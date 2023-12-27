@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #ifndef __BPF_EXPERIMENTAL__
 #define __BPF_EXPERIMENTAL__
 

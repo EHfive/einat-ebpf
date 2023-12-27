@@ -1,6 +1,10 @@
-#include "bpf_ct.h"
-#include "bpf_experimental.h"
-#include "vmlinux.h"
+// SPDX-FileCopyrightText: 2023 Huang-Huang Bao
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "kernel/vmlinux.h"
+#include "kernel/bpf_ct.h"
+#include "kernel/bpf_experimental.h"
+
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 
@@ -60,32 +64,6 @@ struct conn_value {
 };
 
 #define private(name) SEC(".bss." #name) __hidden
-
-// static inline int nf_inet_addr_cmp(const union nf_inet_addr *a1,
-//                                    const union nf_inet_addr *a2) {
-//     return a1->all[0] == a2->all[0] && a1->all[1] == a2->all[1] &&
-//            a1->all[2] == a2->all[2] && a1->all[3] == a2->all[3];
-// }
-
-// static inline bool
-// __nf_ct_tuple_src_equal(const struct nf_conntrack_tuple *t1,
-//                         const struct nf_conntrack_tuple *t2) {
-//     return (nf_inet_addr_cmp(&t1->src.u3, &t2->src.u3) &&
-//             t1->src.u.all == t2->src.u.all && t1->src.l3num == t2->src.l3num);
-// }
-
-// static inline bool
-// __nf_ct_tuple_dst_equal(const struct nf_conntrack_tuple *t1,
-//                         const struct nf_conntrack_tuple *t2) {
-//     return (nf_inet_addr_cmp(&t1->dst.u3, &t2->dst.u3) &&
-//             t1->dst.u.all == t2->dst.u.all &&
-//             t1->dst.protonum == t2->dst.protonum);
-// }
-
-// static inline bool nf_ct_tuple_equal(const struct nf_conntrack_tuple *t1,
-//                                      const struct nf_conntrack_tuple *t2) {
-//     return __nf_ct_tuple_src_equal(t1, t2) && __nf_ct_tuple_dst_equal(t1, t2);
-// }
 
 static inline void nf_inet_addr_copy(union nf_inet_addr *a1,
                                      const union nf_inet_addr *a2) {

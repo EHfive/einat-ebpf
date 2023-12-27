@@ -2,6 +2,8 @@
 name = "bpf-full-cone-nat"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-2.0"
+authors = ["Huang-Huang Bao <i@eh5.me>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

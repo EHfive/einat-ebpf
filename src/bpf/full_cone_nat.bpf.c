@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2023 Huang-Huang Bao
+// SPDX-License-Identifier: GPL-2.0-or-later
 #include "full_cone_nat.h"
 
 #define DEFAULT_MAX_ENTRIES 65536 * 4
