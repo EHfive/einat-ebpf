@@ -1,0 +1,24 @@
+[package]
+name = "bpf-full-cone-nat"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+# Link against static `libelf` and `zlib`.
+static = ["libbpf-sys/static"]
+#
+# libbpf is vendrored and static in any case.
+#
+
+[dependencies]
+ctrlc = "3.4.1"
+lexopt = "0.3.0"
+libbpf-rs = "0.22.0"
+libbpf-sys = "1.2.1"
+nix = "0.27.1"
+
+[build-dependencies]
+libbpf-cargo = "0.22.0"
