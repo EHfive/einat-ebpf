@@ -17,6 +17,11 @@
 #define TC_ACT_OK 0
 #define TC_ACT_SHOT 2
 
+enum {
+    NAT_FILTERING_INDEPENDENT = 0, // Endpoint-Independent Filtering
+    NAT_FILTERING_DEST_ADDRESS,    // Address-Dependent Filtering
+};
+
 union u_inet_addr {
     __u32 all[4];
     __be32 ip;
@@ -33,6 +38,9 @@ struct inet_tuple {
 struct mapping_key {
     // SNAT external source addr & port
     union u_inet_addr ext_addr;
+    // destination address for "Address-Dependent Filtering", 0 if in
+    // "Endpoint-Independent Filtering" mode
+    union u_inet_addr dest_addr;
     // interface this mapping associated with
     u32 ifindex;
     __be16 ext_port;
@@ -71,8 +79,8 @@ struct conn_value {
 
 #define COPY_ADDR6(t, s) (__builtin_memcpy((t), (s), sizeof(t)))
 
-static inline void inet_tuple_copy(struct inet_tuple *t1,
-                                   const struct inet_tuple *t2) {
+static inline __attribute__((always_inline)) void
+inet_tuple_copy(struct inet_tuple *t1, const struct inet_tuple *t2) {
 
     COPY_ADDR6(t1->saddr.all, t2->saddr.all);
     COPY_ADDR6(t1->daddr.all, t2->daddr.all);
@@ -80,16 +88,17 @@ static inline void inet_tuple_copy(struct inet_tuple *t1,
     t1->dport = t2->dport;
 }
 
-static inline void inet_tuple_parse_nf(struct inet_tuple *t,
-                                       const struct nf_conntrack_tuple *t2) {
+static inline __attribute__((always_inline)) void
+inet_tuple_parse_nf(struct inet_tuple *t, const struct nf_conntrack_tuple *t2) {
     COPY_ADDR6(t->saddr.all, t2->src.u3.all);
     COPY_ADDR6(t->daddr.all, t2->dst.u3.all);
     t->sport = t2->src.u.all;
     t->dport = t2->dst.u.all;
 }
 
-static inline void bpf_sock_tuple_parse(struct bpf_sock_tuple *t, bool is_ipv4,
-                                        const struct inet_tuple *t2) {
+static inline __attribute__((always_inline)) void
+bpf_sock_tuple_parse(struct bpf_sock_tuple *t, bool is_ipv4,
+                     const struct inet_tuple *t2) {
     if (is_ipv4) {
         t->ipv4.saddr = t2->saddr.ip;
         t->ipv4.daddr = t2->daddr.ip;
@@ -103,11 +112,18 @@ static inline void bpf_sock_tuple_parse(struct bpf_sock_tuple *t, bool is_ipv4,
     }
 }
 
-static inline void conn_key_parse(struct conn_key *c_key,
-                                  const struct mapping_key *m_key,
-                                  const struct inet_tuple *tuple) {
-    c_key->key.ifindex = m_key->ifindex;
-    c_key->key.ext_port = m_key->ext_port;
-    COPY_ADDR6(c_key->key.ext_addr.all, m_key->ext_addr.all);
+static inline __attribute__((always_inline)) void
+mapping_key_copy(struct mapping_key *k, const struct mapping_key *k2) {
+
+    k->ifindex = k2->ifindex;
+    k->ext_port = k2->ext_port;
+    COPY_ADDR6(k->ext_addr.all, k2->ext_addr.all);
+    COPY_ADDR6(k->dest_addr.all, k2->dest_addr.all);
+}
+
+static inline __attribute__((always_inline)) void
+conn_key_parse(struct conn_key *c_key, const struct mapping_key *m_key,
+               const struct inet_tuple *tuple) {
+    mapping_key_copy(&c_key->key, m_key);
     inet_tuple_copy(&c_key->origin, tuple);
 }

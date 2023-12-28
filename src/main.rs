@@ -20,15 +20,33 @@ BPF Full Cone NAT
 USAGE:
   bpf-full-cone-nat [OPTIONS]
 OPTIONS:
-  -h, --help       Print this message
-  -i, --ifname     Network interface name, e.g. eth0
-      --ifindex    Network interface index number, e.g. 2
+  -h, --help        Print this message
+  -i, --ifname      Network interface name, e.g. eth0
+      --ifindex     Network interface index number, e.g. 2
+  -m, --mode <id>   NAT filtering mode, 1 or 2
+                        1 - Endpoint-Independent Filtering, default
+                        2 - Address-Dependent Filtering
 ";
+
+enum Filtering {
+    EndpointIndependent,
+    AddressDependent,
+}
+impl Filtering {
+    fn to_mode_data(&self) -> u8 {
+        use Filtering::*;
+        match self {
+            EndpointIndependent => 0,
+            AddressDependent => 1,
+        }
+    }
+}
 
 #[derive(Default)]
 struct Args {
     if_index: Option<u32>,
     if_name: Option<String>,
+    mode: Option<Filtering>,
 }
 
 fn parse_env_args() -> Result<Args, lexopt::Error> {
@@ -46,6 +64,18 @@ fn parse_env_args() -> Result<Args, lexopt::Error> {
             }
             Long("ifindex") => {
                 args.if_index = Some(parser.value()?.parse()?);
+            }
+            Short('m') | Long("mode") => {
+                let num = parser.value()?.parse::<i32>()?;
+                let mode = match num {
+                    1 => Filtering::EndpointIndependent,
+                    2 => Filtering::AddressDependent,
+                    _ => {
+                        eprintln!("invalid filtering mode id: {}", num);
+                        std::process::exit(1);
+                    }
+                };
+                args.mode.replace(mode);
             }
             _ => return Err(opt.unexpected()),
         }
@@ -81,6 +111,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     skel_builder.obj_builder.debug(true);
 
     let mut open_skel = skel_builder.open()?;
+    open_skel.rodata_mut().nat_filtering_mode = args
+        .mode
+        .unwrap_or(Filtering::EndpointIndependent)
+        .to_mode_data();
     open_skel
         .maps_mut()
         .mapping_table()

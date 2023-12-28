@@ -4,6 +4,8 @@
 
 #define DEFAULT_MAX_ENTRIES 65536 * 4
 
+const volatile u8 nat_filtering_mode = NAT_FILTERING_INDEPENDENT;
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct mapping_key);
@@ -21,9 +23,9 @@ struct {
     __uint(max_entries, DEFAULT_MAX_ENTRIES);
 } conn_table SEC(".maps");
 
-static int get_tuple(const struct __sk_buff *skb, bool reverse,
-                     struct bpf_sock_tuple *p_tuple, bool *p_is_ipv4,
-                     u8 *p_l4_proto) {
+static int __attribute__((always_inline))
+get_tuple(const struct __sk_buff *skb, bool reverse,
+          struct bpf_sock_tuple *p_tuple, bool *p_is_ipv4, u8 *p_l4_proto) {
     void *data_end = (void *)(long)skb->data_end;
     struct ethhdr *eth = (struct ethhdr *)(void *)(long)skb->data;
 
@@ -115,10 +117,9 @@ static int get_tuple(const struct __sk_buff *skb, bool reverse,
     return TC_ACT_OK;
 }
 
-static inline bool check_mapping_active(struct __sk_buff *skb,
-                                        const struct mapping_key *m_key,
-                                        struct mapping_value *m, bool is_ipv4,
-                                        u8 l4proto) {
+static inline __attribute__((always_inline)) bool
+check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
+                     struct mapping_value *m, bool is_ipv4, u8 l4proto) {
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -192,8 +193,8 @@ static inline bool check_mapping_active(struct __sk_buff *skb,
     return false;
 }
 
-static inline bool delete_mapping(const struct mapping_key *m_key,
-                                  struct mapping_value *m) {
+static inline __attribute__((always_inline)) bool
+delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -234,7 +235,7 @@ static inline bool delete_mapping(const struct mapping_key *m_key,
     return bpf_map_delete_elem(&mapping_table, m_key) == 0;
 }
 
-static inline bool push_mapping_origin(const struct mapping_key *m_key,
+static bool push_mapping_origin(const struct mapping_key *m_key,
                                        struct mapping_value *m,
                                        struct inet_tuple *orig_tuple,
                                        bool update) {
@@ -313,6 +314,7 @@ int ingress_dnat(struct __sk_buff *skb) {
     struct mapping_key key = {
         .ifindex = skb->ifindex,
         .ext_addr.all = {0},
+        .dest_addr.all = {0},
     };
     if (is_ipv4) {
         key.ext_addr.ip = bpf_tuple.ipv4.daddr;
@@ -320,6 +322,13 @@ int ingress_dnat(struct __sk_buff *skb) {
     } else {
         COPY_ADDR6(key.ext_addr.ip6, bpf_tuple.ipv6.daddr);
         key.ext_port = bpf_tuple.ipv6.dport;
+    }
+    if (nat_filtering_mode == NAT_FILTERING_DEST_ADDRESS) {
+        if (is_ipv4) {
+            key.dest_addr.ip = bpf_tuple.ipv4.saddr;
+        } else {
+            COPY_ADDR6(key.dest_addr.ip6, bpf_tuple.ipv6.saddr);
+        }
     }
 
     struct mapping_value *m = bpf_map_lookup_elem(&mapping_table, &key);
@@ -451,18 +460,24 @@ int egress_collect_snat(struct __sk_buff *skb) {
         .ifindex = skb->ifindex,
         .ext_port = tuple->dst.u.all,
         .ext_addr.all = {0},
+        .dest_addr.all = {0},
     };
     COPY_ADDR6(key.ext_addr.all, tuple->dst.u3.all);
+    if (nat_filtering_mode == NAT_FILTERING_DEST_ADDRESS) {
+        COPY_ADDR6(key.dest_addr.all, tuple->src.u3.all);
+    }
 
     if (is_ipv4) {
-        bpf_printk("ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- %x:%d "
-                   "%d->%d dir:%d ",
-                   ct->status, bpf_ntohl(orig_tuple.saddr.ip),
-                   bpf_ntohs(orig_tuple.sport), bpf_ntohl(orig_tuple.daddr.ip),
-                   bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
-                   bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
-                   bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex,
-                   skb->ifindex, ct_opts.dir);
+        // bpf_printk("ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- %x:%d
+        // "
+        //            "%d->%d dir:%d ",
+        //            ct->status, bpf_ntohl(orig_tuple.saddr.ip),
+        //            bpf_ntohs(orig_tuple.sport),
+        //            bpf_ntohl(orig_tuple.daddr.ip),
+        //            bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
+        //            bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
+        //            bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex,
+        //            skb->ifindex, ct_opts.dir);
         bpf_printk("    SNAT found");
     }
 

@@ -1,6 +1,6 @@
 # BPF Full Cone Nat
 
-This BPF program implement an "Endpoint-Independent Filtering" UDP NAT(network address translation) behavior cooperating with existing Netfilter masquerade NAT engine to provide "Full Cone" NAT.
+This BPF program implement an "Endpoint-Independent Filtering" UDP NAT(network address translation) behavior cooperating with existing Netfilter masquerade NAT engine to provide "Full Cone" NAT. It also supports operating in "Address-Dependent Filtering" mode.
 
 ## Requirement
 
@@ -44,8 +44,11 @@ Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress a
 bpf-full-cone-nat --ifname eth0
 ```
 
+You can also set the program to operates in "Address-Dependent Filtering" mode with `-m/--mode` flag, e.g. `bpf-full-cone-nat --ifname eth0 --mode 2`.
+
 To test if this works, you can use tools below. Notice you could only got "Full Cone NAT" if your external network is already "Full Cone" NAT or is a public IP.
 
+-   `stunclient` from [stuntman](https://github.com/jselbie/stunserver)
 -   [stun-nat-behaviour](https://github.com/pion/stun/tree/master/cmd/stun-nat-behaviour)
 -   [go-stun](https://github.com/ccding/go-stun)
 -   [NatTypeTester](https://github.com/HMBSbige/NatTypeTester) on Windows
@@ -55,6 +58,10 @@ To test if this works, you can use tools below. Notice you could only got "Full 
 -   [ ] Investigate concurrency control in this BPF application
 -   [ ] Tagged logging
 -   [ ] Refine userland CLI
+
+## Known Issue
+
+-   SNAT conntracks added by BPF program would not be immediately removed if attached interface reconfigures (e.g. changes the IP address), they will only timing out.
 
 ## Alternatives
 
