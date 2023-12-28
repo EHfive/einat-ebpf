@@ -285,7 +285,7 @@ static bool push_mapping_origin(const struct mapping_key *m_key,
 }
 
 SEC("tc")
-int ingress_dnat(struct __sk_buff *skb) {
+int ingress_add_ct(struct __sk_buff *skb) {
     struct bpf_sock_tuple bpf_tuple = {0};
     bool is_ipv4;
     u8 l4proto;

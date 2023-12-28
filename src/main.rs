@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let progs = skel.progs();
 
-    let mut ingress = TcHookBuilder::new(progs.ingress_dnat().as_fd())
+    let mut ingress = TcHookBuilder::new(progs.ingress_add_ct().as_fd())
         .ifindex(if_index as _)
         .replace(true)
         .handle(1)
