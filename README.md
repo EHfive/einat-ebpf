@@ -75,3 +75,10 @@ The project works similarly to these kernel modules but we don't require an extr
 -   How NAT traversal works, by David Anderson <https://tailscale.com/blog/how-nat-traversal-works>
 -   RFC 4787, Network Address Translation (NAT) Behavioral Requirements for Unicast UDP, <https://datatracker.ietf.org/doc/html/rfc4787>
 -   从 DNAT 到 netfilter 内核子系统，浅谈 Linux 的 Full Cone NAT 实现, by @Chion82 <https://blog.chionlab.moe/2018/02/09/full-cone-nat-with-linux/>
+
+## COPYING
+
+Sources under ./src/bpf/kernel are derived from Linux kernel, hence they are GPL-2.0-only licensed.
+For other files under this project, unless specified, they are GPL-2.0-or-later licensed.
+
+Notice our BPF program calls into GPL-licensed kernel functions so you need to choose GPL-2.0-only license to distribute it.

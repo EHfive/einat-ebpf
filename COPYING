@@ -1,4 +1,0 @@
-Sources under ./src/bpf/kernel are derived from Linux kernel, hence they are GPL-2.0-only licensed.
-For other files under this project, unless specified, they are GPL-2.0-or-later licensed.
-
-Notice our BPF program calls into GPL-licensed kernel functions so you need to choose GPL-2.0-only license to distribute it.
