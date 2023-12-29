@@ -7,10 +7,10 @@ use std::sync::mpsc;
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{TcHookBuilder, TC_EGRESS, TC_INGRESS};
 
-mod nat {
+mod bpf_nat_skel {
     include!(concat!(env!("OUT_DIR"), "/full_cone_nat.skel.rs"));
 }
-use nat::*;
+use bpf_nat_skel::*;
 
 const BPF_F_NO_PREALLOC: u32 = 1;
 
@@ -150,6 +150,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     rx.recv().unwrap();
 
     egress.detach().unwrap();
+    ingress.detach().unwrap();
+    egress.destroy().unwrap();
     ingress.destroy().unwrap();
 
     Ok(())

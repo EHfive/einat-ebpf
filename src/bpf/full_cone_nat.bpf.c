@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "full_cone_nat.h"
 
-#define DEFAULT_MAX_ENTRIES 65536 * 4
+#define DEFAULT_MAX_ENTRIES (65536 * 4)
 
 const volatile u8 nat_filtering_mode = NAT_FILTERING_INDEPENDENT;
 
@@ -23,7 +23,7 @@ struct {
     __uint(max_entries, DEFAULT_MAX_ENTRIES);
 } conn_table SEC(".maps");
 
-static int __attribute__((always_inline))
+static inline __attribute__((always_inline)) int
 get_tuple(const struct __sk_buff *skb, bool reverse,
           struct bpf_sock_tuple *p_tuple, bool *p_is_ipv4, u8 *p_l4_proto) {
     void *data_end = (void *)(long)skb->data_end;
@@ -236,9 +236,8 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
 }
 
 static bool push_mapping_origin(const struct mapping_key *m_key,
-                                       struct mapping_value *m,
-                                       struct inet_tuple *orig_tuple,
-                                       bool update) {
+                                struct mapping_value *m,
+                                struct inet_tuple *orig_tuple, bool update) {
     int ret;
     struct conn_key c_key = {0};
 
@@ -388,7 +387,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
     // use DNAT, the same SNAT source mapping would not be guaranteed for new
     // connections originated from internal if the original SNAT conntrack seen
     // from egress expires, as there is no other conntrack that share the same
-    // source mapping keep the mapping alive.
+    // source mapping keeps the mapping alive.
     bpf_ct_set_nat_info(cf_conn_init, &ext_addr, bpf_ntohs(key.ext_port),
                         NF_NAT_MANIP_SRC);
     bpf_ct_set_timeout(cf_conn_init, 30000);
@@ -408,7 +407,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
 
     if (is_ipv4)
         bpf_printk("    ingress mapping added %x:%d len:%d",
-                   bpf_ntohl(m->orig_addr.ip), m->orig_port, m->len);
+                   bpf_ntohl(m->orig_addr.ip), bpf_ntohs(m->orig_port), m->len);
 
 ct_done:
     bpf_ct_release(nf_conn);
@@ -468,16 +467,14 @@ int egress_collect_snat(struct __sk_buff *skb) {
     }
 
     if (is_ipv4) {
-        // bpf_printk("ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- %x:%d
-        // "
-        //            "%d->%d dir:%d ",
-        //            ct->status, bpf_ntohl(orig_tuple.saddr.ip),
-        //            bpf_ntohs(orig_tuple.sport),
-        //            bpf_ntohl(orig_tuple.daddr.ip),
-        //            bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
-        //            bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
-        //            bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex,
-        //            skb->ifindex, ct_opts.dir);
+        bpf_printk("ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- %x:%d"
+                   "%d->%d dir:%d ",
+                   ct->status, bpf_ntohl(orig_tuple.saddr.ip),
+                   bpf_ntohs(orig_tuple.sport), bpf_ntohl(orig_tuple.daddr.ip),
+                   bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
+                   bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
+                   bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex,
+                   skb->ifindex, ct_opts.dir);
         bpf_printk("    SNAT found");
     }
 

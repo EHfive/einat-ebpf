@@ -8,6 +8,7 @@ This eBPF application implements an "Endpoint-Independent Filtering" UDP NAT(net
 -   `libelf` from elfutils
 -   `zlib`
 -   `clang` to compile BPF C code
+-   `cargo` and `rustfmt` for building
 
 The kernel version requirement would be lifted on demand as the BPF kernel functions(kfuncs) apis we use are unstable and unfinished (e.g. current bpf linked list and red-black tree apis only allows you to model double-ended queue and priority queue).
 
@@ -38,7 +39,7 @@ table inet nat {
 }
 ```
 
-Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress and relaxing filtering by add extra Netfilter SNAT conntracks on demand at ingress, i.e. "Endpoint-Independent Filtering". When combined this with "Endpoint-Independent Mapping" that Netfilter already provides, you got so-called "Full Cone" NAT.
+Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress and relaxing filtering by adding extra Netfilter SNAT conntracks on demand at ingress, i.e. "Endpoint-Independent Filtering". When combined this with "Endpoint-Independent Mapping" that Netfilter already provides, you got so-called "Full Cone" NAT.
 
 ```shell
 # You might need to `modprobe nf_nat` first
@@ -64,7 +65,7 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 ## Known Issue
 
--   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program. And there is no api to delete conntrack in BPF program. So Instead we can add a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup conntracks added when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
+-   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program. And there is no api to delete conntrack in BPF program. So instead we can add a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup conntracks added when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
 
 ## Alternatives
 
