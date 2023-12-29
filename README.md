@@ -1,6 +1,6 @@
-# BPF Full Cone Nat
+# BPF Full Cone NAT
 
-This BPF program implement an "Endpoint-Independent Filtering" UDP NAT(network address translation) behavior cooperating with existing Netfilter masquerade NAT engine to provide "Full Cone" NAT. It also supports operating in "Address-Dependent Filtering" mode.
+This eBPF application implements an "Endpoint-Independent Filtering" UDP NAT(network address translation) behavior cooperating with existing Netfilter masquerade NAT engine to provide "Full Cone" NAT. It also supports operating in "Address-Dependent Filtering" mode.
 
 ## Requirement
 
@@ -13,13 +13,13 @@ The kernel version requirement would be lifted on demand as the BPF kernel funct
 
 ## Installation
 
-```
+```shell
 cargo install --git https://github.com/EHfive/bpf-full-cone-nat
 ```
 
 Or use Nix flakes we provide.
 
-```
+```shell
 nix build github:EHfive/bpf-full-cone-nat
 ```
 
@@ -41,12 +41,14 @@ table inet nat {
 Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress and relaxing filtering by add extra Netfilter SNAT conntracks on demand at ingress, i.e. "Endpoint-Independent Filtering". When combined this with "Endpoint-Independent Mapping" that Netfilter already provides, you got so-called "Full Cone" NAT.
 
 ```shell
-bpf-full-cone-nat --ifname eth0
+# You might need to `modprobe nf_nat` first
+# if you run this before applying nftables/iptables masquerade rules
+sudo bpf-full-cone-nat --ifname eth0
 ```
 
 You can also set the program to operates in "Address-Dependent Filtering" mode with `-m/--mode` flag, e.g. `bpf-full-cone-nat --ifname eth0 --mode 2`.
 
-To test if this works, you can use tools below. Notice you could only got "Full Cone NAT" if your external network is already "Full Cone" NAT or is a public IP.
+To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone NAT" if your external network is already "Full Cone" NAT or is a public IP.
 
 -   `stunclient` from [stuntman](https://github.com/jselbie/stunserver)
 -   [stun-nat-behaviour](https://github.com/pion/stun/tree/master/cmd/stun-nat-behaviour)
@@ -58,17 +60,18 @@ To test if this works, you can use tools below. Notice you could only got "Full 
 -   [ ] Investigate concurrency control in this BPF application
 -   [ ] Tagged logging
 -   [ ] Refine userland CLI
+-   [ ] Add end-to-end tests and CI
 
 ## Known Issue
 
--   SNAT conntracks added by BPF program would not be immediately removed if attached interface reconfigures (e.g. changes the IP address), they will only timing out.
+-   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program. And there is no api to delete conntrack in BPF program. So Instead we can add a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup conntracks added when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
 
 ## Alternatives
 
 -   [netfilter-full-cone-nat](https://github.com/Chion82/netfilter-full-cone-nat)
 -   [nft-fullcone](https://github.com/fullcone-nat-nftables)
 
-The project works similarly to these kernel modules but we don't require an extra iptables/nftables extension code in userland, hence hugely simplifies the deployment. And the tool needs you no change to existing NAT iptables/nftables rules but just turns "Address and Port-Dependent Filtering" to "Endpoint-Independent Filtering".
+The project works similarly to these kernel modules, but we don't require compiling out-of-tree kernel module for specific kernel version or applying an extra out-of-tree iptables/nftables extension patch in userland, hence hugely simplifies the deployment. And the tool needs you no change to existing NAT iptables/nftables rules but just turns "Address and Port-Dependent Filtering" to "Endpoint-Independent Filtering".
 
 ## Recommended Reading
 
