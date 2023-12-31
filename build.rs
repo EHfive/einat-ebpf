@@ -10,7 +10,12 @@ fn main() {
         PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set in build script"));
     out.push("full_cone_nat.skel.rs");
 
-    let c_args = vec!["-Wno-compare-distinct-pointer-types".to_string()];
+    let mut c_args = vec!["-Wno-compare-distinct-pointer-types".to_string()];
+
+    if cfg!(feature = "bpf_atomic") {
+        c_args.push("-mcpu=v3".to_string());
+        c_args.push("-DFEATURE_BPF_ATOMIC".to_string());
+    }
 
     SkeletonBuilder::new()
         .source(SRC)

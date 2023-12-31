@@ -6,6 +6,9 @@
 
 const volatile u8 nat_filtering_mode = NAT_FILTERING_INDEPENDENT;
 
+__s32 mapping_lock SEC(".data") = 0;
+bool pausing SEC(".data") = false;
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct mapping_key);
@@ -22,6 +25,33 @@ struct {
     __type(value, struct conn_value);
     __uint(max_entries, DEFAULT_MAX_ENTRIES);
 } conn_table SEC(".maps");
+
+#ifdef FEATURE_BPF_ATOMIC
+
+static inline __attribute__((always_inline)) bool spin_lock_acquire() {
+    if (!__atomic_exchange_n(&mapping_lock, 1, __ATOMIC_ACQUIRE)) {
+        return true;
+    }
+    bpf_repeat(BPF_MAX_LOOPS) {
+        if (!__atomic_exchange_n(&mapping_lock, 1, __ATOMIC_ACQUIRE)) {
+            return true;
+        }
+    }
+    bpf_printk("failed to acquire lock");
+    return false;
+}
+
+static inline __attribute__((always_inline)) void spin_lock_release() {
+    // Somehow __ATOMIC_RELEASE fails to compile
+    __atomic_exchange_n(&mapping_lock, 0, __ATOMIC_ACQ_REL);
+}
+
+#else
+static inline __attribute__((always_inline)) bool spin_lock_acquire() {
+    return true;
+}
+static inline __attribute__((always_inline)) void spin_lock_release() {}
+#endif
 
 static inline __attribute__((always_inline)) int
 get_tuple(const struct __sk_buff *skb, bool reverse,
@@ -235,9 +265,9 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
     return bpf_map_delete_elem(&mapping_table, m_key) == 0;
 }
 
-static bool push_mapping_origin(const struct mapping_key *m_key,
-                                struct mapping_value *m,
-                                struct inet_tuple *orig_tuple, bool update) {
+static inline __attribute__((always_inline)) bool
+push_mapping_origin(const struct mapping_key *m_key, struct mapping_value *m,
+                    struct inet_tuple *orig_tuple, bool update) {
     int ret;
     struct conn_key c_key = {0};
 
@@ -289,6 +319,10 @@ int ingress_add_ct(struct __sk_buff *skb) {
     bool is_ipv4;
     u8 l4proto;
 
+    if (pausing) {
+        return TC_ACT_UNSPEC;
+    }
+
     int ret = get_tuple(skb, false, &bpf_tuple, &is_ipv4, &l4proto);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
@@ -312,6 +346,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
 
     struct mapping_key key = {
         .ifindex = skb->ifindex,
+        .is_ipv4 = is_ipv4,
         .ext_addr.all = {0},
         .dest_addr.all = {0},
     };
@@ -330,10 +365,14 @@ int ingress_add_ct(struct __sk_buff *skb) {
         }
     }
 
+    if (!spin_lock_acquire()) {
+        return TC_ACT_UNSPEC;
+    }
+
     struct mapping_value *m = bpf_map_lookup_elem(&mapping_table, &key);
     if (!m) {
         // SNAT has not seen from egress, bail out
-        return TC_ACT_UNSPEC;
+        goto lk_done;
     }
 
     bpf_printk("ingress no ct, is_ipv4:%d", is_ipv4);
@@ -342,7 +381,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
         if (!delete_mapping(&key, m)) {
             bpf_printk("    delete mapping failed");
         }
-        return TC_ACT_UNSPEC;
+        goto lk_done;
     }
 
     bpf_printk("    ingress found match");
@@ -369,8 +408,10 @@ int ingress_add_ct(struct __sk_buff *skb) {
         is_ipv4 ? sizeof(intern_tuple.ipv4) : sizeof(intern_tuple.ipv6),
         &ct_opts_2, NF_BPF_CT_OPTS_SZ);
     if (!cf_conn_init) {
-        return TC_ACT_UNSPEC;
+        goto lk_done;
     }
+    // TODO: allow setting CT mark, e.g. cf_conn_init->ct.mark = <mark>, either
+    // from user config or from mark of egress collected CT
 
     union nf_inet_addr ext_addr = {0};
     if (is_ipv4) {
@@ -394,23 +435,25 @@ int ingress_add_ct(struct __sk_buff *skb) {
 
     struct nf_conn *nf_conn = bpf_ct_insert_entry(cf_conn_init);
     if (!nf_conn) {
-        return TC_ACT_UNSPEC;
+        goto lk_done;
     }
     bpf_ct_change_status(nf_conn, IPS_SEEN_REPLY);
 
     struct inet_tuple orig_tuple = {0};
     inet_tuple_parse_nf(&orig_tuple,
                         &nf_conn->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
+    bpf_ct_release(nf_conn);
+
     if (!push_mapping_origin(&key, m, &orig_tuple, true)) {
-        goto ct_done;
+        goto lk_done;
     }
 
     if (is_ipv4)
         bpf_printk("    ingress mapping added %x:%d len:%d",
                    bpf_ntohl(m->orig_addr.ip), bpf_ntohs(m->orig_port), m->len);
 
-ct_done:
-    bpf_ct_release(nf_conn);
+lk_done:
+    spin_lock_release();
     return TC_ACT_UNSPEC;
 }
 
@@ -420,6 +463,10 @@ int egress_collect_snat(struct __sk_buff *skb) {
     struct bpf_sock_tuple bpf_tuple = {0};
     bool is_ipv4;
     u8 l4proto;
+
+    if (pausing) {
+        return TC_ACT_UNSPEC;
+    }
 
     // build tuple for reply direction
     ret = get_tuple(skb, true, &bpf_tuple, &is_ipv4, &l4proto);
@@ -450,13 +497,13 @@ int egress_collect_snat(struct __sk_buff *skb) {
     if (ct_opts.dir != IP_CT_DIR_REPLY) {
         goto ct_done;
     }
-
     if ((ct->status & (IPS_SRC_NAT | IPS_DYING)) != IPS_SRC_NAT) {
         goto ct_done;
     }
 
     struct mapping_key key = {
         .ifindex = skb->ifindex,
+        .is_ipv4 = is_ipv4,
         .ext_port = tuple->dst.u.all,
         .ext_addr.all = {0},
         .dest_addr.all = {0},
@@ -478,6 +525,12 @@ int egress_collect_snat(struct __sk_buff *skb) {
         bpf_printk("    SNAT found");
     }
 
+    bpf_ct_release(ct);
+
+    if (!spin_lock_acquire()) {
+        return TC_ACT_UNSPEC;
+    }
+
     bool add_new_mapping = true;
     struct mapping_value *m = bpf_map_lookup_elem(&mapping_table, &key);
     if (m) {
@@ -490,10 +543,10 @@ int egress_collect_snat(struct __sk_buff *skb) {
             bpf_printk("    delete old mapping");
             if (!delete_mapping(&key, m)) {
                 bpf_printk("    delete old mapping failed");
-                goto ct_done;
+                goto lk_done;
             }
         } else if (!push_mapping_origin(&key, m, &orig_tuple, true)) {
-            goto ct_done;
+            goto lk_done;
         }
     }
 
@@ -506,24 +559,26 @@ int egress_collect_snat(struct __sk_buff *skb) {
         };
         COPY_ADDR6(m_new.orig_addr.all, orig_tuple.saddr.all);
 
-        // XXX: handle concurrences?
         if ((ret = bpf_map_update_elem(&mapping_table, &key, &m_new,
-                                       BPF_NOEXIST | BPF_F_LOCK))) {
+                                       BPF_NOEXIST))) {
             bpf_printk("    mapping item insertion full or racing, err: %d",
                        ret);
-            goto ct_done;
+            goto lk_done;
         }
         m = bpf_map_lookup_elem(&mapping_table, &key);
         if (!m) {
             bpf_printk("    racing, item got removed");
-            goto ct_done;
+            goto lk_done;
         }
 
         if (!push_mapping_origin(&key, m, &orig_tuple, false)) {
-            goto ct_done;
+            goto lk_done;
         }
     }
 
+lk_done:
+    spin_lock_release();
+    return TC_ACT_UNSPEC;
 ct_done:
     bpf_ct_release(ct);
     return TC_ACT_UNSPEC;

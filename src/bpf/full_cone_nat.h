@@ -44,6 +44,7 @@ struct mapping_key {
     // interface this mapping associated with
     u32 ifindex;
     __be16 ext_port;
+    bool is_ipv4;
 };
 
 struct mapping_origin {
@@ -116,6 +117,7 @@ static inline __attribute__((always_inline)) void
 mapping_key_copy(struct mapping_key *k, const struct mapping_key *k2) {
 
     k->ifindex = k2->ifindex;
+    k->is_ipv4 = k2->is_ipv4;
     k->ext_port = k2->ext_port;
     COPY_ADDR6(k->ext_addr.all, k2->ext_addr.all);
     COPY_ADDR6(k->dest_addr.all, k2->dest_addr.all);
