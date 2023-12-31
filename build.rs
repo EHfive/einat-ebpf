@@ -23,5 +23,5 @@ fn main() {
         .debug(true)
         .build_and_generate(&out)
         .unwrap();
-    println!("cargo:rerun-if-changed=/null");
+    println!("cargo:rerun-if-changed={SRC}");
 }

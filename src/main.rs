@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
+mod cleaner;
+mod skel;
+
 use std::error::Error;
 use std::os::fd::AsFd;
-use std::sync::mpsc;
 
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{TcHookBuilder, TC_EGRESS, TC_INGRESS};
 
-mod bpf_nat_skel {
-    include!(concat!(env!("OUT_DIR"), "/full_cone_nat.skel.rs"));
-}
-use bpf_nat_skel::*;
+use skel::*;
 
 const BPF_F_NO_PREALLOC: u32 = 1;
 
@@ -84,6 +83,11 @@ fn parse_env_args() -> Result<Args, lexopt::Error> {
     Ok(args)
 }
 
+async fn signal_monitor() -> Result<(), Box<dyn Error>> {
+    tokio::signal::ctrl_c().await?;
+    Err("terminating".into())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_env_args()?;
     if args.if_index.is_none() && args.if_name.is_none() {
@@ -101,16 +105,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         nix::net::if_::if_nametoindex(name)?
     };
 
-    let (tx, rx) = mpsc::channel::<()>();
-    ctrlc::set_handler(move || {
-        tx.send(()).unwrap();
-    })?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
 
     let mut skel_builder = FullConeNatSkelBuilder::default();
 
     skel_builder.obj_builder.debug(true);
 
     let mut open_skel = skel_builder.open()?;
+
     open_skel.rodata_mut().nat_filtering_mode = args
         .mode
         .unwrap_or(Filtering::EndpointIndependent)
@@ -123,7 +127,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         .maps_mut()
         .conn_table()
         .set_map_flags(BPF_F_NO_PREALLOC)?;
-    let skel = open_skel.load()?;
+    let mut skel = open_skel.load()?;
+
+    skel.data_mut().pausing = false;
 
     let progs = skel.progs();
 
@@ -147,7 +153,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     ingress.attach().unwrap();
     egress.attach().unwrap();
 
-    rx.recv().unwrap();
+    if let Err(e) = rt.block_on(async {
+        tokio::try_join!(
+            signal_monitor(),
+            cleaner::clean_ct_task(&mut skel, if_index)
+        )
+    }) {
+        eprintln!("{:?}", e);
+    }
 
     egress.detach().unwrap();
     ingress.detach().unwrap();

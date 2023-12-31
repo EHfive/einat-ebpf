@@ -65,7 +65,8 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 ## Known Issue
 
--   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program. And there is no api to delete conntrack in BPF program. So instead we can add a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup conntracks added when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
+-   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program.
+-   -   **Workaround**: We have added a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup obsolete conntracks when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
 
 ## Alternatives
 

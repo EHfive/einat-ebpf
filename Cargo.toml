@@ -7,6 +7,12 @@ authors = ["Huang-Huang Bao <i@eh5.me>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
+
 [features]
 default = ["bpf_atomic"]
 # Enable the use of atomics in BPF program to implement spin lock
@@ -18,11 +24,18 @@ static = ["libbpf-sys/static"]
 #
 
 [dependencies]
-ctrlc = "3.4.1"
+async-stream = "0.3.5"
+bytemuck = { version = "1.14.0", features = ["derive"] }
+futures-util = { version = "0.3.30", default-features = false, features = [
+    "std",
+] }
 lexopt = "0.3.0"
 libbpf-rs = "0.22.0"
 libbpf-sys = "1.2.1"
+libc = "0.2.151"
+neli = { version = "0.7.0-rc2", features = ["async"] }
 nix = "0.27.1"
+tokio = { version = "1.35.1", features = ["macros", "rt", "signal", "sync"] }
 
 [build-dependencies]
 libbpf-cargo = "0.22.0"
