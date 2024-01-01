@@ -26,6 +26,7 @@ OPTIONS:
   -m, --mode <id>          NAT filtering mode, 1 or 2
                             1 - Endpoint-Independent Filtering, default
                             2 - Address-Dependent Filtering
+      --ct-mark <mark>     Set mark for conntracks added, defaults to 0
       --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 2, WARN
 ";
 
@@ -48,6 +49,7 @@ struct Args {
     if_index: Option<u32>,
     if_name: Option<String>,
     mode: Option<Filtering>,
+    ct_mark: u32,
     log_level: Option<u8>,
 }
 
@@ -78,6 +80,9 @@ fn parse_env_args() -> Result<Args, lexopt::Error> {
                     }
                 };
                 args.mode.replace(mode);
+            }
+            Long("ct-mark") => {
+                args.ct_mark = parser.value()?.parse()?;
             }
             Long("bpf-log") => {
                 args.log_level = Some(parser.value()?.parse()?);
@@ -125,6 +130,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .mode
         .unwrap_or(Filtering::EndpointIndependent)
         .to_mode_data();
+    open_skel.rodata_mut().ct_mark = args.ct_mark;
+
     open_skel
         .maps_mut()
         .mapping_table()

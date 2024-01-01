@@ -5,6 +5,7 @@
 #define DEFAULT_MAX_ENTRIES (65536 * 4)
 
 const volatile u8 nat_filtering_mode = NAT_FILTERING_INDEPENDENT;
+const volatile u32 ct_mark = 0;
 
 u32 mapping_lock SEC(".data") = 0;
 bool pausing SEC(".data") = false;
@@ -419,9 +420,10 @@ int ingress_add_ct(struct __sk_buff *skb) {
     if (!cf_conn_init) {
         goto lk_done;
     }
-    // TODO: allow setting CT mark, e.g. cf_conn_init->ct.mark = <mark>, either
-    // from user config or from mark of egress collected CT
-    cf_conn_init->ct.mark = 2333;
+
+    if (bpf_core_field_exists(cf_conn_init->ct.mark)) {
+        cf_conn_init->ct.mark = ct_mark;
+    }
 
     union nf_inet_addr ext_addr = {0};
     if (is_ipv4) {
