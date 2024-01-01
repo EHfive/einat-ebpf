@@ -18,13 +18,15 @@ BPF Full Cone NAT
 
 USAGE:
   bpf-full-cone-nat [OPTIONS]
+
 OPTIONS:
-  -h, --help        Print this message
-  -i, --ifname      Network interface name, e.g. eth0
-      --ifindex     Network interface index number, e.g. 2
-  -m, --mode <id>   NAT filtering mode, 1 or 2
-                        1 - Endpoint-Independent Filtering, default
-                        2 - Address-Dependent Filtering
+  -h, --help               Print this message
+  -i, --ifname             Network interface name, e.g. eth0
+      --ifindex            Network interface index number, e.g. 2
+  -m, --mode <id>          NAT filtering mode, 1 or 2
+                            1 - Endpoint-Independent Filtering, default
+                            2 - Address-Dependent Filtering
+      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 2, WARN
 ";
 
 enum Filtering {
@@ -46,6 +48,7 @@ struct Args {
     if_index: Option<u32>,
     if_name: Option<String>,
     mode: Option<Filtering>,
+    log_level: Option<u8>,
 }
 
 fn parse_env_args() -> Result<Args, lexopt::Error> {
@@ -75,6 +78,9 @@ fn parse_env_args() -> Result<Args, lexopt::Error> {
                     }
                 };
                 args.mode.replace(mode);
+            }
+            Long("bpf-log") => {
+                args.log_level = Some(parser.value()?.parse()?);
             }
             _ => return Err(opt.unexpected()),
         }
@@ -129,6 +135,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .set_map_flags(BPF_F_NO_PREALLOC)?;
     let mut skel = open_skel.load()?;
 
+    skel.data_mut().log_level = args.log_level.unwrap_or(2).min(5);
     skel.data_mut().pausing = false;
 
     let progs = skel.progs();

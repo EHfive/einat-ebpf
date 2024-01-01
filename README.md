@@ -59,7 +59,7 @@ To test if this works, you can use tools below on internal network behind NAT. N
 ## TODO
 
 -   [x] Investigate concurrency control in this BPF application. (**Solution**: Use atomic based spin-lock to sync mapping operations)
--   [ ] Tagged logging
+-   [x] Tagged logging
 -   [ ] Refine userland CLI
 -   [ ] Add end-to-end tests and CI
 

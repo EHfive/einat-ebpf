@@ -6,8 +6,11 @@
 
 const volatile u8 nat_filtering_mode = NAT_FILTERING_INDEPENDENT;
 
-__s32 mapping_lock SEC(".data") = 0;
+u32 mapping_lock SEC(".data") = 0;
 bool pausing SEC(".data") = false;
+
+u8 log_level SEC(".data") = BPF_LOG_LEVEL_DEBUG;
+#define BPF_LOG_LEVEL log_level
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -29,16 +32,20 @@ struct {
 #ifdef FEATURE_BPF_ATOMIC
 
 static inline __attribute__((always_inline)) bool spin_lock_acquire() {
+#define BPF_LOG_TOPIC "lock"
     if (!__atomic_exchange_n(&mapping_lock, 1, __ATOMIC_ACQUIRE)) {
         return true;
     }
+    bpf_log_trace("someone else is holding the lock");
+
     bpf_repeat(BPF_MAX_LOOPS) {
         if (!__atomic_exchange_n(&mapping_lock, 1, __ATOMIC_ACQUIRE)) {
             return true;
         }
     }
-    bpf_printk("failed to acquire lock");
+    bpf_log_error("failed to acquire lock");
     return false;
+#undef BPF_LOG_TOPIC
 }
 
 static inline __attribute__((always_inline)) void spin_lock_release() {
@@ -150,6 +157,7 @@ get_tuple(const struct __sk_buff *skb, bool reverse,
 static inline __attribute__((always_inline)) bool
 check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
                      struct mapping_value *m, bool is_ipv4, u8 l4proto) {
+#define BPF_LOG_TOPIC "check mapping"
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -157,7 +165,7 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
 
     int i = 0;
     bpf_for(i, 0, len) {
-        bpf_printk("    looping %d", i);
+        bpf_log_trace("looping %d", i);
         struct mapping_origin *origin;
         struct bpf_list_node *n;
         struct bpf_sock_tuple bpf_tuple;
@@ -169,7 +177,7 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
             m->len--;
         bpf_spin_unlock(&m->lock);
         if (!n) {
-            bpf_printk("    racing, origin list length not sync");
+            bpf_log_error("racing, origin list length not sync");
             return false;
         }
 
@@ -189,9 +197,9 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
             struct conn_key c_key = {0};
             conn_key_parse(&c_key, m_key, &origin->orig_tuple);
 
-            bpf_printk("    clean expired mapping");
+            bpf_log_debug("clean expired mapping");
             if ((ret = bpf_map_delete_elem(&conn_table, &c_key))) {
-                bpf_printk("    delete conn failed, err:%d", ret);
+                bpf_log_error("delete conn failed, err:%d", ret);
             }
 
             bpf_obj_drop(origin);
@@ -201,7 +209,7 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
         bpf_spin_lock(&m->lock);
         if ((ret = bpf_list_push_back(&m->origin_list_head, &origin->node))) {
             bpf_spin_unlock(&m->lock);
-            bpf_printk("    push back origin failed, err: %d", ret);
+            bpf_log_error("push back origin failed, err: %d", ret);
         } else {
             m->len++;
             bpf_spin_unlock(&m->lock);
@@ -212,19 +220,13 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
         }
     }
 
-    bpf_spin_lock(&m->lock);
-    len = m->len;
-    bpf_spin_unlock(&m->lock);
-
-    if (len != 0) {
-        bpf_printk("    racing, new origin added");
-    }
-
     return false;
+#undef BPF_LOG_TOPIC
 }
 
 static inline __attribute__((always_inline)) bool
 delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
+#define BPF_LOG_TOPIC "delete mapping"
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -232,7 +234,7 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
 
     int i = 0;
     bpf_for(i, 0, len) {
-        bpf_printk("    looping %d", i);
+        bpf_log_trace("looping %d", i);
         struct mapping_origin *origin;
         struct bpf_list_node *n;
 
@@ -242,7 +244,7 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
             m->len--;
         bpf_spin_unlock(&m->lock);
         if (!n) {
-            bpf_printk("    racing, origin list length not sync");
+            bpf_log_error("racing, origin list length not sync");
             break;
         }
         origin = container_of(n, typeof(*origin), node);
@@ -250,40 +252,44 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
         struct conn_key c_key = {0};
         conn_key_parse(&c_key, m_key, &origin->orig_tuple);
 
-        bpf_printk(
-            "    delete conn mapping ext:%x:%d %x:%d %x:%d -> %x:%d",
+        bpf_log_debug(
+            "delete conn mapping ext:%x:%d %x:%d %x:%d -> %x:%d",
             bpf_ntohl(c_key.key.ext_addr.ip), bpf_ntohs(c_key.key.ext_port),
             bpf_ntohl(c_key.origin.saddr.ip), bpf_ntohs(c_key.origin.sport),
             bpf_ntohl(c_key.origin.daddr.ip), bpf_ntohs(c_key.origin.dport));
         if ((ret = bpf_map_delete_elem(&conn_table, &c_key))) {
-            bpf_printk("    delete conn failed, err: %d", ret);
+            bpf_log_error("delete conn failed, err: %d", ret);
         }
 
         bpf_obj_drop(origin);
     }
 
     return bpf_map_delete_elem(&mapping_table, m_key) == 0;
+#undef BPF_LOG_TOPIC
 }
 
 static inline __attribute__((always_inline)) bool
 push_mapping_origin(const struct mapping_key *m_key, struct mapping_value *m,
                     struct inet_tuple *orig_tuple, bool update) {
+#define BPF_LOG_TOPIC "push origin"
+
     int ret;
     struct conn_key c_key = {0};
 
     conn_key_parse(&c_key, m_key, orig_tuple);
 
-    bpf_printk("    inserting conn mapping ext:%x:%d %x:%d -> %x:%d %d",
-               bpf_ntohl(c_key.key.ext_addr.ip), bpf_ntohs(c_key.key.ext_port),
-               bpf_ntohl(c_key.origin.saddr.ip), bpf_ntohs(c_key.origin.sport),
-               bpf_ntohl(c_key.origin.daddr.ip), bpf_ntohs(c_key.origin.dport));
+    bpf_log_debug(
+        "inserting conn mapping ext:%x:%d %x:%d -> %x:%d %d",
+        bpf_ntohl(c_key.key.ext_addr.ip), bpf_ntohs(c_key.key.ext_port),
+        bpf_ntohl(c_key.origin.saddr.ip), bpf_ntohs(c_key.origin.sport),
+        bpf_ntohl(c_key.origin.daddr.ip), bpf_ntohs(c_key.origin.dport));
 
     struct conn_value *c = bpf_map_lookup_elem(&conn_table, &c_key);
     if (c) {
         if (!update) {
-            bpf_printk("    origin already added, racing");
+            bpf_log_error("origin already added, racing");
         } else {
-            bpf_printk("    origin already added, success");
+            bpf_log_debug("origin already added, success");
         }
         return update;
     }
@@ -298,7 +304,7 @@ push_mapping_origin(const struct mapping_key *m_key, struct mapping_value *m,
     bpf_spin_lock(&m->lock);
     if ((ret = bpf_list_push_back(&m->origin_list_head, &origin->node))) {
         bpf_spin_unlock(&m->lock);
-        bpf_printk("    push back origin failed, err: %d", ret);
+        bpf_log_error("push back origin failed, err: %d", ret);
         return false;
     } else {
         m->len++;
@@ -306,15 +312,18 @@ push_mapping_origin(const struct mapping_key *m_key, struct mapping_value *m,
     bpf_spin_unlock(&m->lock);
 
     if ((ret = bpf_map_update_elem(&conn_table, &c_key, &c_new, BPF_NOEXIST))) {
-        bpf_printk("    conn item insertion full or racing, err: %d", ret);
+        bpf_log_error("conn item insertion full or racing, err: %d", ret);
         return false;
     }
 
     return true;
+#undef BPF_LOG_TOPIC
 }
 
 SEC("tc")
 int ingress_add_ct(struct __sk_buff *skb) {
+#define BPF_LOG_TOPIC "ingress"
+
     struct bpf_sock_tuple bpf_tuple = {0};
     bool is_ipv4;
     u8 l4proto;
@@ -326,7 +335,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
     int ret = get_tuple(skb, false, &bpf_tuple, &is_ipv4, &l4proto);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
-            bpf_printk("invalid packet");
+            bpf_log_trace("invalid packet");
         }
         return TC_ACT_UNSPEC;
     }
@@ -375,16 +384,16 @@ int ingress_add_ct(struct __sk_buff *skb) {
         goto lk_done;
     }
 
-    bpf_printk("ingress no ct, is_ipv4:%d", is_ipv4);
+    bpf_log_debug("ingress no ct, is_ipv4:%d", is_ipv4);
     if (!check_mapping_active(skb, &key, m, is_ipv4, l4proto)) {
-        bpf_printk("    mapping not active");
+        bpf_log_debug("mapping not active");
         if (!delete_mapping(&key, m)) {
-            bpf_printk("    delete mapping failed");
+            bpf_log_error("delete mapping failed");
         }
         goto lk_done;
     }
 
-    bpf_printk("    ingress found match");
+    bpf_log_debug("ingress found match");
 
     struct bpf_sock_tuple intern_tuple;
     if (is_ipv4) {
@@ -412,6 +421,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
     }
     // TODO: allow setting CT mark, e.g. cf_conn_init->ct.mark = <mark>, either
     // from user config or from mark of egress collected CT
+    cf_conn_init->ct.mark = 2333;
 
     union nf_inet_addr ext_addr = {0};
     if (is_ipv4) {
@@ -449,16 +459,20 @@ int ingress_add_ct(struct __sk_buff *skb) {
     }
 
     if (is_ipv4)
-        bpf_printk("    ingress mapping added %x:%d len:%d",
-                   bpf_ntohl(m->orig_addr.ip), bpf_ntohs(m->orig_port), m->len);
+        bpf_log_info("ingress mapping added %x:%d len:%d",
+                     bpf_ntohl(m->orig_addr.ip), bpf_ntohs(m->orig_port),
+                     m->len);
 
 lk_done:
     spin_lock_release();
     return TC_ACT_UNSPEC;
+#undef BPF_LOG_TOPIC
 }
 
 SEC("tc")
 int egress_collect_snat(struct __sk_buff *skb) {
+#define BPF_LOG_TOPIC "egress"
+
     int ret;
     struct bpf_sock_tuple bpf_tuple = {0};
     bool is_ipv4;
@@ -472,7 +486,7 @@ int egress_collect_snat(struct __sk_buff *skb) {
     ret = get_tuple(skb, true, &bpf_tuple, &is_ipv4, &l4proto);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
-            bpf_printk("invalid packet");
+            bpf_log_trace("invalid packet");
         }
         return TC_ACT_UNSPEC;
     }
@@ -514,15 +528,14 @@ int egress_collect_snat(struct __sk_buff *skb) {
     }
 
     if (is_ipv4) {
-        bpf_printk("ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- %x:%d"
-                   "%d->%d dir:%d ",
-                   ct->status, bpf_ntohl(orig_tuple.saddr.ip),
-                   bpf_ntohs(orig_tuple.sport), bpf_ntohl(orig_tuple.daddr.ip),
-                   bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
-                   bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
-                   bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex,
-                   skb->ifindex, ct_opts.dir);
-        bpf_printk("    SNAT found");
+        bpf_log_debug(
+            "SNAT found, ct status:%x origin: %x:%d -> %x:%d reply: %x:%d <- "
+            "%x:%d %d->%d",
+            ct->status, bpf_ntohl(orig_tuple.saddr.ip),
+            bpf_ntohs(orig_tuple.sport), bpf_ntohl(orig_tuple.daddr.ip),
+            bpf_ntohs(orig_tuple.dport), bpf_ntohl(tuple->src.u3.ip),
+            bpf_ntohs(tuple->src.u.all), bpf_ntohl(tuple->dst.u3.ip),
+            bpf_ntohs(tuple->dst.u.all), skb->ingress_ifindex, skb->ifindex);
     }
 
     bpf_ct_release(ct);
@@ -534,15 +547,15 @@ int egress_collect_snat(struct __sk_buff *skb) {
     bool add_new_mapping = true;
     struct mapping_value *m = bpf_map_lookup_elem(&mapping_table, &key);
     if (m) {
-        bpf_printk("    found old mapping");
+        bpf_log_debug("found old mapping");
         add_new_mapping =
             !(m->orig_port == orig_tuple.sport &&
               __builtin_memcmp(m->orig_addr.all, orig_tuple.saddr.all,
                                sizeof(m->orig_addr.all)) == 0);
         if (add_new_mapping) {
-            bpf_printk("    delete old mapping");
+            // TODO reuse old mapping
             if (!delete_mapping(&key, m)) {
-                bpf_printk("    delete old mapping failed");
+                bpf_log_error("delete old mapping failed");
                 goto lk_done;
             }
         } else if (!push_mapping_origin(&key, m, &orig_tuple, true)) {
@@ -551,7 +564,7 @@ int egress_collect_snat(struct __sk_buff *skb) {
     }
 
     if (add_new_mapping) {
-        bpf_printk("    add new mapping");
+        bpf_log_info("add new mapping");
         struct mapping_value m_new = {
             .orig_addr.all = {0},
             .orig_port = orig_tuple.sport,
@@ -561,13 +574,13 @@ int egress_collect_snat(struct __sk_buff *skb) {
 
         if ((ret = bpf_map_update_elem(&mapping_table, &key, &m_new,
                                        BPF_NOEXIST))) {
-            bpf_printk("    mapping item insertion full or racing, err: %d",
-                       ret);
+            bpf_log_error("mapping item insertion full or racing, err: %d",
+                          ret);
             goto lk_done;
         }
         m = bpf_map_lookup_elem(&mapping_table, &key);
         if (!m) {
-            bpf_printk("    racing, item got removed");
+            bpf_log_error("racing, item got removed");
             goto lk_done;
         }
 
@@ -582,6 +595,7 @@ lk_done:
 ct_done:
     bpf_ct_release(ct);
     return TC_ACT_UNSPEC;
+#undef BPF_LOG_TOPIC
 }
 
 char _license[] SEC("license") = "GPL";
