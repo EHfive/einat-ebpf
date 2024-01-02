@@ -10,7 +10,10 @@ const volatile u32 ct_mark = 0;
 u32 mapping_lock SEC(".data") = 0;
 bool pausing SEC(".data") = false;
 
+
 u8 log_level SEC(".data") = BPF_LOG_LEVEL_DEBUG;
+#undef BPF_LOG_LEVEL
+#undef BPF_LOG_TOPIC
 #define BPF_LOG_LEVEL log_level
 
 struct {
@@ -158,7 +161,7 @@ get_tuple(const struct __sk_buff *skb, bool reverse,
 static inline __attribute__((always_inline)) bool
 check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
                      struct mapping_value *m, bool is_ipv4, u8 l4proto) {
-#define BPF_LOG_TOPIC "check mapping"
+#define BPF_LOG_TOPIC "check_mapping"
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -227,7 +230,7 @@ check_mapping_active(struct __sk_buff *skb, const struct mapping_key *m_key,
 
 static inline __attribute__((always_inline)) bool
 delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
-#define BPF_LOG_TOPIC "delete mapping"
+#define BPF_LOG_TOPIC "delete_mapping"
     int ret;
     bpf_spin_lock(&m->lock);
     int len = m->len;
@@ -272,7 +275,7 @@ delete_mapping(const struct mapping_key *m_key, struct mapping_value *m) {
 static inline __attribute__((always_inline)) bool
 push_mapping_origin(const struct mapping_key *m_key, struct mapping_value *m,
                     struct inet_tuple *orig_tuple, bool update) {
-#define BPF_LOG_TOPIC "push origin"
+#define BPF_LOG_TOPIC "push_origin"
 
     int ret;
     struct conn_key c_key = {0};

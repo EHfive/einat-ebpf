@@ -20,15 +20,16 @@ enum bpf_log_level {
 #define _BPF_LOG_LEVEL_DEBUG_TOKEN "DEBUG"
 #define _BPF_LOG_LEVEL_TRACE_TOKEN "TRACE"
 
-// can be overwritten with #define on the same name
-static const int BPF_LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
-static const char BPF_LOG_TOPIC[] = "default";
+// can be overwritten with #undef and re #define on the same name
+#define BPF_LOG_LEVEL BPF_LOG_LEVEL_DEBUG;
+#define BPF_LOG_TOPIC "default"
 
 #define _bpf_log_logv(level, fmt, args...)                                     \
     ({                                                                         \
         if (BPF_LOG_LEVEL >= level) {                                          \
-            bpf_printk("[b-f-c-n][" _##level##_TOKEN "] %s: " fmt,             \
-                       BPF_LOG_TOPIC, ##args);                                 \
+            bpf_printk("[b-f-c-n][" _##level##_TOKEN "] " BPF_LOG_TOPIC        \
+                                                     ": " fmt,                 \
+                       ##args);                                                \
         }                                                                      \
     })
 
