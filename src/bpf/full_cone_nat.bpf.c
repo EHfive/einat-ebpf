@@ -10,7 +10,6 @@ const volatile u32 ct_mark = 0;
 u32 mapping_lock SEC(".data") = 0;
 bool pausing SEC(".data") = false;
 
-
 u8 log_level SEC(".data") = BPF_LOG_LEVEL_DEBUG;
 #undef BPF_LOG_LEVEL
 #undef BPF_LOG_TOPIC
@@ -450,6 +449,7 @@ int ingress_add_ct(struct __sk_buff *skb) {
 
     struct nf_conn *nf_conn = bpf_ct_insert_entry(cf_conn_init);
     if (!nf_conn) {
+        bpf_log_error("failed to insert SNAT CT, %d", bpf_ntohs(key.ext_port));
         goto lk_done;
     }
     bpf_ct_change_status(nf_conn, IPS_SEEN_REPLY);

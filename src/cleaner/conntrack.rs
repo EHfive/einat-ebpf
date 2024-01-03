@@ -138,7 +138,6 @@ fn build_delete_udp_ct_msg(
     Ok(nl_msg)
 }
 
-#[allow(unused)]
 pub async fn delete_udp_ct(
     is_reply: bool,
     s_addr: IpAddr,

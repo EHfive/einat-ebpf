@@ -1,3 +1,10 @@
+> [!CAUTION]
+> After some investigation, it turns out that Netfilter does not guarantees "Endpoint-Independent Mapping" as it's possible to create conntracks for different internal source address or port with same external port as long as the destination address or port was not same. So the program was built on a false assumption and does not gives you "Full Cone" NAT in multiple hosts(can include NAT host itself) scenario..
+>
+> The conclusion is the Netfilter conntrack system was built with "Address and Port-Dependent" philosophy from beginning and any approaches trying to make it "Endpoint-Independent" would be hacky and inefficient. So it's better to avoid it or at lease not basing on it if we want to implement any not lesser NAT behaviors.
+>
+> What's next after this failed attempt? I am thinking rather implement a fully functional NAT engine (at least for UDP) with BPF instead of relying on Netfilter conntrack.
+
 # BPF Full Cone NAT
 
 This eBPF application implements an "Endpoint-Independent Filtering" UDP NAT(network address translation) behavior cooperating with existing Netfilter masquerade NAT engine to provide "Full Cone" NAT. It also supports operating in "Address-Dependent Filtering" mode.
@@ -26,7 +33,7 @@ nix build github:EHfive/bpf-full-cone-nat
 
 ## Usage
 
-Setup masquerade NAT using nftables or iptables as usual, this will gives you "Endpoint-Independent Mapping" but "Address and Port-Dependent Filtering" NAT.
+Setup masquerade NAT using nftables or iptables as usual, this will gives you ~~"Endpoint-Independent Mapping"~~ but "Address and Port-Dependent Filtering" NAT.
 
 Example nftables rule that source NAT IP/TCP, IP/UDP, ... packets from `192.168.1.0/24` to eth0, the "external" interface.
 
@@ -39,7 +46,7 @@ table inet nat {
 }
 ```
 
-Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress and relaxing filtering by adding extra Netfilter SNAT conntracks on demand at ingress, i.e. "Endpoint-Independent Filtering". When combined this with "Endpoint-Independent Mapping" that Netfilter already provides, you got so-called "Full Cone" NAT.
+Then just start `bpf-full-cone-nat`, it will monitor SNATs at interface egress and relaxing filtering by adding extra Netfilter SNAT conntracks on demand at ingress, i.e. "Endpoint-Independent Filtering". ~~When combined this with "Endpoint-Independent Mapping" that Netfilter already provides, you got so-called "Full Cone" NAT~~.
 
 ```shell
 # You might need to `modprobe nf_nat` first
@@ -49,7 +56,7 @@ sudo bpf-full-cone-nat --ifname eth0
 
 You can also set the program to operates in "Address-Dependent Filtering" mode with `-m/--mode` flag, e.g. `bpf-full-cone-nat --ifname eth0 --mode 2`.
 
-To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone NAT" if your external network is already "Full Cone" NAT or is a public IP.
+To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
 
 -   `stunclient` from [stuntman](https://github.com/jselbie/stunserver)
 -   [stun-nat-behaviour](https://github.com/pion/stun/tree/master/cmd/stun-nat-behaviour)
@@ -60,6 +67,7 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 -   [x] Investigate concurrency control in this BPF application. (**Solution**: Use atomic based spin-lock to sync mapping operations)
 -   [x] Tagged logging
+-   [ ] Use BPF timer to periodically refresh mapping records
 -   [ ] Refine userland CLI
 -   [ ] Add end-to-end tests and CI
 
@@ -67,6 +75,8 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 -   SNAT conntracks added by BPF program would not be immediately removed if attached network interface reconfigures (e.g. changes the IP address), they will only timing out. There is indeed an extra conntrack nat extension field `masq_index` handling this case, but it's not accessible from BPF program.
 -   -   **Workaround**: We have added a userland [netlink](https://man7.org/linux/man-pages/man7/netlink.7.html) monitor to cleanup obsolete conntracks when interface goes down, which I think is fine as it's not as timing sensitive as live packet filtering.
+
+-   If external host has initiated a connection to a port that has not yet been used by SNAT thus creating a conntrack to NAT host, that connection would not be forwarding to internal host behind NAT until the relevant conntrack expires.
 
 ## Alternatives
 
