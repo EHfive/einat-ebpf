@@ -4,14 +4,13 @@ mod cleaner;
 mod skel;
 
 use std::error::Error;
+use std::net::IpAddr;
 use std::os::fd::AsFd;
 
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{TcHookBuilder, TC_EGRESS, TC_INGRESS};
 
 use skel::*;
-
-const BPF_F_NO_PREALLOC: u32 = 1;
 
 const HELP: &str = "\
 BPF Full Cone NAT
@@ -23,37 +22,19 @@ OPTIONS:
   -h, --help               Print this message
   -i, --ifname             Network interface name, e.g. eth0
       --ifindex            Network interface index number, e.g. 2
-  -m, --mode <id>          NAT filtering mode, 1 or 2
-                            1 - Endpoint-Independent Filtering, default
-                            2 - Address-Dependent Filtering
-      --ct-mark <mark>     Set mark for conntracks added, defaults to 0
+      --external-ip        Static external IP address
       --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 2, WARN
 ";
-
-enum Filtering {
-    EndpointIndependent,
-    AddressDependent,
-}
-impl Filtering {
-    fn to_mode_data(&self) -> u8 {
-        use Filtering::*;
-        match self {
-            EndpointIndependent => 0,
-            AddressDependent => 1,
-        }
-    }
-}
 
 #[derive(Default)]
 struct Args {
     if_index: Option<u32>,
     if_name: Option<String>,
-    mode: Option<Filtering>,
-    ct_mark: u32,
+    ip_addr: Option<IpAddr>,
     log_level: Option<u8>,
 }
 
-fn parse_env_args() -> Result<Args, lexopt::Error> {
+fn parse_env_args() -> Result<Args, Box<dyn Error>> {
     use lexopt::prelude::*;
     let mut args = Args::default();
     let mut parser = lexopt::Parser::from_env();
@@ -69,25 +50,13 @@ fn parse_env_args() -> Result<Args, lexopt::Error> {
             Long("ifindex") => {
                 args.if_index = Some(parser.value()?.parse()?);
             }
-            Short('m') | Long("mode") => {
-                let num = parser.value()?.parse::<i32>()?;
-                let mode = match num {
-                    1 => Filtering::EndpointIndependent,
-                    2 => Filtering::AddressDependent,
-                    _ => {
-                        eprintln!("invalid filtering mode id: {}", num);
-                        std::process::exit(1);
-                    }
-                };
-                args.mode.replace(mode);
-            }
-            Long("ct-mark") => {
-                args.ct_mark = parser.value()?.parse()?;
+            Long("external-ip") => {
+                args.ip_addr = Some(parser.value()?.parse()?);
             }
             Long("bpf-log") => {
                 args.log_level = Some(parser.value()?.parse()?);
             }
-            _ => return Err(opt.unexpected()),
+            _ => return Err(opt.unexpected().into()),
         }
     }
 
@@ -99,6 +68,49 @@ async fn signal_monitor() -> Result<(), Box<dyn Error>> {
     Err("terminating".into())
 }
 
+fn set_map_config(skel: &mut FullConeNatSkel, ip_addr: IpAddr) -> Result<(), Box<dyn Error>> {
+    match ip_addr {
+        IpAddr::V4(ip) => {
+            skel.data_mut().g_ipv4_external_addr = u32::from_ne_bytes(ip.octets());
+            let lpm_key = Ipv4LpmKey {
+                prefix_len: 32,
+                ip: ip.octets(),
+            };
+
+            let mut ext_config = ExternalConfig::default();
+            ext_config.udp_range[0] = PortRange {
+                from_port: 20000,
+                to_port: 23999,
+            };
+            ext_config.udp_range[1] = PortRange {
+                from_port: 25000,
+                to_port: 29999,
+            };
+            ext_config.udp_range_len = 2;
+
+            let dest_config = DestConfig {
+                flags: 1, // hairpin
+            };
+            skel.maps().map_ipv4_external_config().update(
+                bytemuck::bytes_of(&lpm_key),
+                bytemuck::bytes_of(&ext_config),
+                libbpf_rs::MapFlags::ANY,
+            )?;
+
+            skel.maps().map_ipv4_dest_config().update(
+                bytemuck::bytes_of(&lpm_key),
+                bytemuck::bytes_of(&dest_config),
+                libbpf_rs::MapFlags::ANY,
+            )?;
+        }
+        IpAddr::V6(_ip6) => {
+            todo!("IPv6 SNAT not implemented yet")
+        }
+    };
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_env_args()?;
     if args.if_index.is_none() && args.if_name.is_none() {
@@ -108,6 +120,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("specify either -i/--ifname or --ifindex but not both");
         std::process::exit(1);
     }
+
+    let Some(ip_addr) = args.ip_addr else {
+        eprintln!("static external IP address required for now");
+        std::process::exit(1);
+    };
 
     let if_index = if let Some(i) = args.if_index {
         i
@@ -126,35 +143,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut open_skel = skel_builder.open()?;
 
-    open_skel.rodata_mut().nat_filtering_mode = args
-        .mode
-        .unwrap_or(Filtering::EndpointIndependent)
-        .to_mode_data();
-    open_skel.rodata_mut().ct_mark = args.ct_mark;
+    open_skel.rodata_mut().ENABLE_FIB_LOOKUP_SRC = 0;
 
-    open_skel
-        .maps_mut()
-        .mapping_table()
-        .set_map_flags(BPF_F_NO_PREALLOC)?;
-    open_skel
-        .maps_mut()
-        .conn_table()
-        .set_map_flags(BPF_F_NO_PREALLOC)?;
     let mut skel = open_skel.load()?;
 
-    skel.data_mut().log_level = args.log_level.unwrap_or(2).min(5);
-    skel.data_mut().pausing = false;
+    skel.data_mut().g_log_level = args.log_level.unwrap_or(5).min(5);
+    set_map_config(&mut skel, ip_addr)?;
 
     let progs = skel.progs();
 
-    let mut ingress = TcHookBuilder::new(progs.ingress_add_ct().as_fd())
+    let mut ingress = TcHookBuilder::new(progs.ingress_rev_snat().as_fd())
         .ifindex(if_index as _)
         .replace(true)
         .handle(1)
         .priority(1)
         .hook(TC_INGRESS);
 
-    let mut egress = TcHookBuilder::new(progs.egress_collect_snat().as_fd())
+    let mut egress = TcHookBuilder::new(progs.egress_snat().as_fd())
         .ifindex(if_index as _)
         .replace(true)
         .handle(1)

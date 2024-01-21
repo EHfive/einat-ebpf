@@ -28,7 +28,7 @@ enum bpf_log_level {
     ({                                                                         \
         if (BPF_LOG_LEVEL >= level) {                                          \
             bpf_printk("[b-f-c-n][" _##level##_TOKEN "] " BPF_LOG_TOPIC        \
-                                                     ": " fmt,                 \
+                                                     " : " fmt,                \
                        ##args);                                                \
         }                                                                      \
     })

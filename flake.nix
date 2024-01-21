@@ -1,14 +1,18 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    systems.url = "github:nix-systems/default-linux";
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+      inputs.systems.follows = "systems";
+    };
     naersk = {
       url = "github:nix-community/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, flake-utils, naersk, nixpkgs }:
+  outputs = { self, flake-utils, naersk, nixpkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs) {
@@ -33,13 +37,10 @@
           nativeBuildInputs = deps;
         };
 
-        packages.static = naersk'.buildPackage {
+        packages.default-debug = naersk'.buildPackage {
           src = ./.;
-          nativeBuildInputs = deps ++ (with pkgs.pkgsStatic; [
-            elfutils # TODO: broken, build a static libelf ourself
-            zlib
-          ]);
-          cargoBuildOptions = default: default ++ [ "--features static" ];
+          nativeBuildInputs = deps;
+          release = false;
         };
 
         # For `nix develop`:

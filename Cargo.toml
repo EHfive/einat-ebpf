@@ -15,7 +15,7 @@ strip = true
 
 [features]
 default = ["bpf_atomic"]
-# Enable the use of atomics in BPF program to implement spin lock
+# Enable the use of atomics in BPF program
 bpf_atomic = []
 # Link against static `libelf` and `zlib`.
 static = ["libbpf-sys/static"]

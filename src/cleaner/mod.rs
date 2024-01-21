@@ -1,4 +1,3 @@
-mod conntrack;
 mod route;
 
 use std::pin::pin;
@@ -9,7 +8,7 @@ use std::{
 
 use futures_util::StreamExt;
 
-use crate::skel::{ConnKey, FullConeNatSkel};
+use crate::skel::FullConeNatSkel;
 
 fn ip_addr_from_slice(bytes: &[u8; 16], is_ipv4: bool) -> IpAddr {
     if is_ipv4 {
@@ -38,23 +37,13 @@ pub async fn clean_ct_task(
     let clean_task = tokio::spawn(async move {
         while let Some(tuple) = rx.recv().await {
             let ConnTuple {
-                ext_addr,
-                dest_addr,
-                ext_port,
-                dest_port,
+                ext_addr: _,
+                dest_addr: _,
+                ext_port: _,
+                dest_port: _,
             } = tuple;
 
-            // It's external IP being changed so we filter by that to avoid deleting valid conntrack
-            if let Err(_e) =
-                conntrack::delete_udp_ct(true, dest_addr, ext_addr, dest_port, ext_port).await
-            {
-                // CTs could already be deleted by nf_nat so it's expected to error
-
-                // println!(
-                //     "failed to delete {}:{}({}:{}) -> {}:{}, err: {:?}",
-                //     ext_addr, ext_port, src_addr, src_port, dest_addr, dest_port, e
-                // );
-            }
+            // TODO: delete binding and CT from maps
         }
     });
 
@@ -73,41 +62,13 @@ pub async fn clean_ct_task(
 
         struct PausingRecover<'a, 'b>(&'a mut FullConeNatSkel<'b>);
         impl Drop for PausingRecover<'_, '_> {
-            fn drop(&mut self) {
-                self.0.data_mut().pausing = false;
-            }
+            fn drop(&mut self) {}
         }
 
         let skel = PausingRecover(skel);
-        skel.0.data_mut().pausing = true;
-        let maps = skel.0.maps();
+        let _maps = skel.0.maps();
 
-        for key in maps.conn_table().keys() {
-            let conn_key: &ConnKey = bytemuck::from_bytes(&key);
-            if conn_key.mapping_key.if_index != if_index {
-                continue;
-            }
-            let is_ipv4 = conn_key.mapping_key.is_ipv4 != 0;
-            let ext_addr = ip_addr_from_slice(&conn_key.mapping_key.ext_addr, is_ipv4);
-            if let Some(addr) = ev.ip_addr {
-                if addr != ext_addr {
-                    continue;
-                }
-            }
-            // let src_addr = ip_addr_from_slice(&conn_key.origin.src_addr, is_ipv4);
-            let dest_addr = ip_addr_from_slice(&conn_key.origin.dst_addr, is_ipv4);
-            // let src_port = u16::from_be(conn_key.origin.src_port);
-            let dest_port = u16::from_be(conn_key.origin.dst_port);
-            let ext_port = u16::from_be(conn_key.mapping_key.ext_port);
-
-            tx.send(ConnTuple {
-                ext_addr,
-                dest_addr,
-                ext_port,
-                dest_port,
-            })
-            .await?;
-        }
+        // TODO: filter map entries to be deleted
     }
 
     drop(tx);

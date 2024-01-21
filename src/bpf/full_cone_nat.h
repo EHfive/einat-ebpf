@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "kernel/bpf_ct.h"
-#include "kernel/bpf_experimental.h"
 #include "kernel/vmlinux.h"
 
 #include <bpf/bpf_endian.h>
@@ -19,10 +17,13 @@
 #define TC_ACT_OK 0
 #define TC_ACT_SHOT 2
 
-enum {
-    NAT_FILTERING_INDEPENDENT = 0, // Endpoint-Independent Filtering
-    NAT_FILTERING_DEST_ADDRESS,    // Address-Dependent Filtering
-};
+#define AF_INET 2
+#define AF_INET6 10
+
+#define CLOCK_MONOTONIC 1
+
+#define BPF_LOOP_RET_CONTINUE 0
+#define BPF_LOOP_RET_BREAK 1
 
 union u_inet_addr {
     __u32 all[4];
@@ -37,53 +38,113 @@ struct inet_tuple {
     __be16 dport;
 };
 
-struct mapping_key {
-    // SNAT external source addr & port
-    union u_inet_addr ext_addr;
-    // destination address for "Address-Dependent Filtering", 0 if in
-    // "Endpoint-Independent Filtering" mode
-    union u_inet_addr dest_addr;
-    // interface this mapping associated with
+struct ipv4_lpm_key {
+    u32 prefixlen;
+    __be32 ip;
+};
+
+struct ipv6_lpm_key {
+    u32 prefixlen;
+    __be32 ip6[4];
+};
+
+struct port_range {
+    u16 begin_port;
+    u16 end_port;
+};
+
+#define MAX_PORT_RANGES 16
+
+struct external_config {
+    struct port_range tcp_range[MAX_PORT_RANGES];
+    struct port_range udp_range[MAX_PORT_RANGES];
+    struct port_range icmp_range[MAX_PORT_RANGES];
+    u8 tcp_range_len;
+    u8 udp_range_len;
+    u8 icmp_range_len;
+// Set to prevent creating new binding and corresponding CTs
+#define EXTERNAL_DELETING_FLAG (1 << 0)
+#define EXTERNAL_NO_SNAT_FLAG (1 << 1)
+    u8 flags;
+};
+
+struct dest_config {
+#define DEST_HAIRPIN_FLAG (1 << 0)
+#define DEST_NO_SNAT_FLAG (1 << 1)
+    u8 flags;
+};
+
+#define BINDING_ORIG_DIR_FLAG (1 << 0)
+#define FRAG_TRACK_EGRESS_FLAG (1 << 0)
+#define ADDR_IPV4_FLAG (1 << 1)
+#define ADDR_IPV6_FLAG (1 << 2) // not supported yet
+
+struct map_frag_track_key {
     u32 ifindex;
-    __be16 ext_port;
-    bool is_ipv4;
+    u8 flags;
+    u8 l4proto;
+    __be16 id;
+    union u_inet_addr saddr;
+    union u_inet_addr daddr;
 };
 
-struct mapping_origin {
-    struct inet_tuple orig_tuple;
-    struct bpf_list_node node;
+struct map_frag_track_value {
+    __be16 sport;
+    __be16 dport;
+
+    struct bpf_timer timer;
 };
 
-struct mapping_value {
-    // internal source addr & port
-    union u_inet_addr orig_addr;
-    __be16 orig_port;
-
-    // struct bpf_timer refresh_timer;
-
-    // NOTE: It's not well documented but bpf_{list_head, rb_node} requires
-    // using bpf_spin_lock, see
-    // https://github.com/torvalds/linux/blob/5254c0cbc92d2a08e75443bdb914f1c4839cdf5a/kernel/bpf/btf.c#L3820-L3825
-    struct bpf_spin_lock lock;
-    struct bpf_list_head origin_list_head __contains(mapping_origin, node);
-    u32 len;
+// If BINDING_ORIG_DIR_FLAG is set, "from" is internal source address and "to"
+// is mapped external source address, otherwise the relations are reversed.
+// We duplicate binding entries for both direction for looking up from both
+// ingress and egress.
+struct map_binding_key {
+    u32 ifindex;
+    u8 flags;
+    u8 l4proto;
+    // ICMP ID in the case of ICMP
+    __be16 from_port;
+    union u_inet_addr from_addr;
 };
 
-struct conn_key {
+struct map_binding_value {
+    union u_inet_addr to_addr;
+    __be16 to_port;
+    u8 flags;
+    u8 is_static;
+    // We only do binding ref counting on inbound direction, i.e. no
+    // BINDING_ORIG_DIR_FLAG on binding key
+    u32 use;
+    u32 ref;
+};
+
+struct map_ct_key {
+    u32 ifindex;
+    u8 flags;
+    u8 l4proto;
+    u8 _pad[2];
+    struct inet_tuple external;
+};
+
+enum ct_state {
+    CT_IN_ONLY,
+    CT_ESTABLISHED,
+};
+
+struct map_ct_value {
     struct inet_tuple origin;
-    struct mapping_key key;
+    u8 flags;
+    u16 state;
+    u32 last_seen;
+    struct bpf_timer timer;
 };
-
-struct conn_value {
-    u8 _placeholder;
-};
-
-#define private(name) SEC(".bss." #name) __hidden
 
 #define COPY_ADDR6(t, s) (__builtin_memcpy((t), (s), sizeof(t)))
+#define ADDR6_EQ(t, s) (0 == __builtin_memcmp((t), (s), sizeof(t)))
 
-static inline __attribute__((always_inline)) void
-inet_tuple_copy(struct inet_tuple *t1, const struct inet_tuple *t2) {
+static __always_inline void inet_tuple_copy(struct inet_tuple *t1,
+                                            const struct inet_tuple *t2) {
 
     COPY_ADDR6(t1->saddr.all, t2->saddr.all);
     COPY_ADDR6(t1->daddr.all, t2->daddr.all);
@@ -91,43 +152,24 @@ inet_tuple_copy(struct inet_tuple *t1, const struct inet_tuple *t2) {
     t1->dport = t2->dport;
 }
 
-static inline __attribute__((always_inline)) void
-inet_tuple_parse_nf(struct inet_tuple *t, const struct nf_conntrack_tuple *t2) {
-    COPY_ADDR6(t->saddr.all, t2->src.u3.all);
-    COPY_ADDR6(t->daddr.all, t2->dst.u3.all);
-    t->sport = t2->src.u.all;
-    t->dport = t2->dst.u.all;
+static __always_inline void inet_tuple_rev_copy(struct inet_tuple *t1,
+                                                const struct inet_tuple *t2) {
+
+    COPY_ADDR6(t1->saddr.all, t2->daddr.all);
+    COPY_ADDR6(t1->daddr.all, t2->saddr.all);
+    t1->sport = t2->dport;
+    t1->dport = t2->sport;
 }
 
-static inline __attribute__((always_inline)) void
-bpf_sock_tuple_parse(struct bpf_sock_tuple *t, bool is_ipv4,
-                     const struct inet_tuple *t2) {
-    if (is_ipv4) {
-        t->ipv4.saddr = t2->saddr.ip;
-        t->ipv4.daddr = t2->daddr.ip;
-        t->ipv4.sport = t2->sport;
-        t->ipv4.dport = t2->dport;
-    } else {
-        COPY_ADDR6(t->ipv6.saddr, t2->saddr.ip6);
-        COPY_ADDR6(t->ipv6.daddr, t2->daddr.ip6);
-        t->ipv6.sport = t2->sport;
-        t->ipv6.dport = t2->dport;
-    }
-}
-
-static inline __attribute__((always_inline)) void
-mapping_key_copy(struct mapping_key *k, const struct mapping_key *k2) {
-
-    k->ifindex = k2->ifindex;
-    k->is_ipv4 = k2->is_ipv4;
-    k->ext_port = k2->ext_port;
-    COPY_ADDR6(k->ext_addr.all, k2->ext_addr.all);
-    COPY_ADDR6(k->dest_addr.all, k2->dest_addr.all);
-}
-
-static inline __attribute__((always_inline)) void
-conn_key_parse(struct conn_key *c_key, const struct mapping_key *m_key,
-               const struct inet_tuple *tuple) {
-    mapping_key_copy(&c_key->key, m_key);
-    inet_tuple_copy(&c_key->origin, tuple);
+static __always_inline void
+get_rev_dir_binding_key(struct map_binding_key *key_rev,
+                        const struct map_binding_key *key,
+                        const struct map_binding_value *val) {
+    key_rev->ifindex = key->ifindex;
+    key_rev->flags =
+        (val->flags & (~BINDING_ORIG_DIR_FLAG)) |
+        ((key->flags & BINDING_ORIG_DIR_FLAG) ^ BINDING_ORIG_DIR_FLAG);
+    key_rev->l4proto = key->l4proto;
+    key_rev->from_port = val->to_port;
+    COPY_ADDR6(key_rev->from_addr.all, val->to_addr.all);
 }
