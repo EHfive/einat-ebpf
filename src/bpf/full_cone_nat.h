@@ -173,3 +173,23 @@ get_rev_dir_binding_key(struct map_binding_key *key_rev,
     key_rev->from_port = val->to_port;
     COPY_ADDR6(key_rev->from_addr.all, val->to_addr.all);
 }
+
+static __always_inline int
+find_port_range_idx(u16 port, u32 range_len,
+                    const struct port_range range_list[MAX_PORT_RANGES]) {
+#pragma unroll
+    for (int i = 0; i < MAX_PORT_RANGES; i++) {
+        if (i >= range_len) {
+            break;
+        }
+        const struct port_range *range = &range_list[i];
+
+        if (range->end_port == 0) {
+            break;
+        }
+        if (port >= range->begin_port && port <= range->end_port) {
+            return i;
+        }
+    }
+    return -1;
+}

@@ -7,6 +7,7 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::os::fd::AsFd;
 
+use bytemuck::bytes_of;
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{TcHookBuilder, TC_EGRESS, TC_INGRESS};
 
@@ -92,14 +93,14 @@ fn set_map_config(skel: &mut FullConeNatSkel, ip_addr: IpAddr) -> Result<(), Box
                 flags: 1, // hairpin
             };
             skel.maps().map_ipv4_external_config().update(
-                bytemuck::bytes_of(&lpm_key),
-                bytemuck::bytes_of(&ext_config),
+                bytes_of(&lpm_key),
+                bytes_of(&ext_config),
                 libbpf_rs::MapFlags::ANY,
             )?;
 
             skel.maps().map_ipv4_dest_config().update(
-                bytemuck::bytes_of(&lpm_key),
-                bytemuck::bytes_of(&dest_config),
+                bytes_of(&lpm_key),
+                bytes_of(&dest_config),
                 libbpf_rs::MapFlags::ANY,
             )?;
         }

@@ -339,27 +339,13 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_SHOT;
     }
 
-    bool in_range = false;
-    u32 ext_port = bpf_ntohs(pkt.tuple.dport);
-
-#pragma unroll
-    for (int i = 0; i < MAX_PORT_RANGES; i++) {
-        struct port_range *range = &ext_config->udp_range[i];
-        if (range->end_port == 0) {
-            break;
-        }
-        if (ext_port >= range->begin_port && ext_port <= range->end_port) {
-            in_range = true;
-            break;
-        }
-    }
-    if (!in_range) {
+    u16 ext_port = bpf_ntohs(pkt.tuple.dport);
+    if (find_port_range_idx(ext_port, ext_config->udp_range_len,
+                            ext_config->udp_range) < 0) {
         bpf_log_trace("external port %d not in mapping range, passthrough",
                       ext_port);
         return TC_ACT_UNSPEC;
     }
-
-    // TODO: do static binding instead
 
     bpf_log_debug("src:%pI4 dst:%pI4", &pkt.tuple.saddr.ip,
                   &pkt.tuple.daddr.ip);
@@ -519,9 +505,13 @@ fill_unique_binding_port(const struct map_binding_key *key_orig,
         return TC_ACT_SHOT;
     }
 
+    struct port_range *proto_range = ext_config->udp_range;
     u32 range_len = ext_config->udp_range_len;
     if (range_len == 0) {
         return TC_ACT_SHOT;
+    }
+    if (range_len > MAX_PORT_RANGES) {
+        range_len = MAX_PORT_RANGES;
     }
 
     struct find_port_ctx ctx;
@@ -531,24 +521,8 @@ fill_unique_binding_port(const struct map_binding_key *key_orig,
     ctx.curr_port = bpf_ntohs(ctx.key.from_port);
     ctx.found = false;
 
-    int start_range_idx = -1;
-#pragma unroll
-    for (int i = 0; i < MAX_PORT_RANGES; i++) {
-        if (i >= range_len) {
-            break;
-        }
-        struct port_range *range = &ext_config->udp_range[i];
-        if (range->end_port == 0) {
-            range_len = i;
-            break;
-        }
-
-        if (ctx.curr_port >= range->begin_port &&
-            ctx.curr_port <= range->end_port) {
-            start_range_idx = i;
-            break;
-        }
-    }
+    int start_range_idx =
+        find_port_range_idx(ctx.curr_port, range_len, proto_range);
     if (start_range_idx < 0) {
         start_range_idx = bpf_get_prandom_u32() % range_len;
     }
@@ -560,7 +534,7 @@ fill_unique_binding_port(const struct map_binding_key *key_orig,
         }
         u32 idx = (start_range_idx + i) % range_len % MAX_PORT_RANGES;
 
-        ctx.range = ext_config->udp_range[idx];
+        ctx.range = proto_range[idx];
         ctx.curr_remaining = ctx.range.end_port - ctx.range.begin_port + 1;
         if (ctx.curr_remaining <= 0) {
             bpf_log_error("invalid port range [%d, %d]", ctx.range.begin_port,
@@ -620,27 +594,12 @@ int egress_snat(struct __sk_buff *skb) {
             return TC_ACT_SHOT;
         }
 
-        bool in_range = false;
-        u32 ext_port = bpf_ntohs(pkt.tuple.sport);
-
-#pragma unroll
-        for (int i = 0; i < MAX_PORT_RANGES; i++) {
-            if (i >= ext_config->udp_range_len) {
-                break;
-            }
-            struct port_range *range = &ext_config->udp_range[i];
-            if (range->end_port == 0) {
-                break;
-            }
-            if (ext_port >= range->begin_port && ext_port <= range->end_port) {
-                in_range = true;
-                break;
-            }
-        }
-        if (!in_range) {
+        u16 ext_port = bpf_ntohs(pkt.tuple.sport);
+        if (find_port_range_idx(ext_port, ext_config->udp_range_len,
+                                ext_config->udp_range) < 0) {
             bpf_log_trace("external port %d not in mapping range, passthrough",
                           ext_port);
-            return TC_ACT_UNSPEC;
+            goto check_hairpin;
         }
 
         if (false) {
