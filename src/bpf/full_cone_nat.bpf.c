@@ -69,6 +69,8 @@ struct packet_info {
     u16 frag_off;
     u32 frag_id;
     struct inet_tuple tuple;
+    // XXX: save offsets only and don't reference skb data directly to ease
+    // verification?
     struct ethhdr *eth;
     union {
         struct iphdr *iph;
@@ -172,6 +174,7 @@ found_upper_layer:
     return (void *)pkt->ip6h + len;
 }
 
+// not inline to speedup eBPF verification
 static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
     void *data_end = (void *)(long)skb->data_end;
     pkt->eth = (struct ethhdr *)(void *)(long)skb->data;
@@ -231,6 +234,92 @@ static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
     return TC_ACT_OK;
 }
 
+static int frag_timer_cb(void *_map_frag_track, struct map_frag_track_key *key,
+                         struct bpf_timer *timer) {
+#define BPF_LOG_TOPIC "fragment_track"
+    bpf_log_trace("fragmentation tracking timeout, deleting");
+    bpf_map_delete_elem(&map_frag_track, key);
+    return 0;
+#undef BPF_LOG_TOPIC
+}
+
+static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
+                          u8 flags) {
+#define BPF_LOG_TOPIC "fragment_track"
+
+    if (pkt->frag_type == FRAG_NONE ||
+        pkt->frag_type == FRAG_LAST && pkt->frag_off == 0) {
+        // this is an atomic packet
+        return pkt->first_fragment ? TC_ACT_OK : TC_ACT_UNSPEC;
+    }
+
+    int ret;
+    struct map_frag_track_key key = {
+        .ifindex = skb->ifindex,
+        .flags = (pkt->is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG) | flags,
+        .l4proto = pkt->nexthdr,
+        .id = pkt->frag_id,
+        .saddr = pkt->tuple.saddr,
+        .daddr = pkt->tuple.daddr,
+    };
+
+    struct map_frag_track_value *value;
+    if (pkt->frag_type == FRAG_MORE && pkt->first_fragment &&
+        pkt->frag_off == 0) {
+        struct map_frag_track_value value_new = {
+            .sport = pkt->tuple.sport,
+            .dport = pkt->tuple.dport,
+        };
+
+        ret = bpf_map_update_elem(&map_frag_track, &key, &value_new, BPF_ANY);
+        if (ret) {
+            bpf_log_error(
+                "failed to insert fragmentation tracking entry, err:%d", ret);
+            return TC_ACT_SHOT;
+        }
+        value = bpf_map_lookup_elem(&map_frag_track, &key);
+        if (!value) {
+            return TC_ACT_SHOT;
+        }
+        ret = bpf_timer_init(&value->timer, &map_frag_track, 0);
+        if (ret) {
+            bpf_log_error("failed to init timer, err:%d", ret);
+            goto delete_entry;
+        }
+        ret = bpf_timer_set_callback(&value->timer, frag_timer_cb);
+        if (ret) {
+            bpf_log_error("failed to set timer callback, err:%d", ret);
+            goto delete_entry;
+        }
+
+        bpf_log_trace("ifindex:%d, flags:%d, id:%d, %pI4->%pI4, l4proto:%d",
+                      key.ifindex, key.flags, key.id, &key.saddr.ip,
+                      &key.daddr.ip, key.l4proto);
+    } else {
+        value = bpf_map_lookup_elem(&map_frag_track, &key);
+        if (!value) {
+            bpf_log_warn(
+                "fragmentation session of this packet was not tracked");
+            return TC_ACT_SHOT;
+        }
+        pkt->tuple.sport = value->sport;
+        pkt->tuple.dport = value->dport;
+    }
+
+    ret = bpf_timer_start(&value->timer,
+                          pkt->frag_type == FRAG_LAST ? 5E9 : 30E9, 0);
+    if (ret) {
+        bpf_log_error("failed to start timer, err:%d", ret);
+        goto delete_entry;
+    }
+
+    return TC_ACT_OK;
+delete_entry:
+    bpf_map_delete_elem(&map_frag_track, &key);
+    return TC_ACT_SHOT;
+#undef BPF_LOG_TOPIC
+}
+
 static __always_inline int ipv4_update_csum(struct __sk_buff *skb, u32 l3_off,
                                             u32 l4_off, __be32 from_addr,
                                             __be16 from_port, __be32 to_addr,
@@ -252,6 +341,14 @@ static __always_inline int ipv4_update_csum(struct __sk_buff *skb, u32 l3_off,
         return ret;
 
     return 0;
+}
+
+static __always_inline int ipv4_update_csum_l3(struct __sk_buff *skb,
+                                               u32 l3_off, __be32 from_addr,
+                                               __be32 to_addr) {
+    u32 ip_check_off = l3_off + offsetof(struct iphdr, check);
+
+    return bpf_l3_csum_replace(skb, ip_check_off, from_addr, to_addr, 4);
 }
 
 static __always_inline struct map_binding_value *
@@ -404,10 +501,8 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    if (pkt.frag_type != FRAG_NONE || !pkt.first_fragment) {
-        // TODO: fragmentation tracking
-        bpf_log_warn("fragmentation tracking not supported yet, dropping");
-        return TC_ACT_SHOT;
+    if ((ret = fragment_track(skb, &pkt, 0)) != TC_ACT_OK) {
+        return ret;
     }
 
     struct ipv4_lpm_key ext_key = {.prefixlen = 32, .ip = pkt.tuple.daddr.ip};
@@ -432,7 +527,7 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    bpf_log_debug("src:%pI4 dst:%pI4", &pkt.tuple.saddr.ip,
+    bpf_log_trace("src:%pI4 dst:%pI4", &pkt.tuple.saddr.ip,
                   &pkt.tuple.daddr.ip);
 
     struct map_ct_key ct_key = {
@@ -503,11 +598,17 @@ int ingress_rev_snat(struct __sk_buff *skb) {
     u32 l4_off = (void *)pkt.udph - (void *)pkt.eth;
 
     pkt.iph->daddr = ct_value->origin.saddr.ip;
-    pkt.udph->dest = ct_value->origin.sport;
 
-    ret = ipv4_update_csum(skb, l3_off, l4_off, ct_key.external.saddr.ip,
-                           ct_key.external.sport, ct_value->origin.saddr.ip,
-                           ct_value->origin.sport);
+    if (pkt.first_fragment) {
+        pkt.udph->dest = ct_value->origin.sport;
+
+        ret = ipv4_update_csum(skb, l3_off, l4_off, ct_key.external.saddr.ip,
+                               ct_key.external.sport, ct_value->origin.saddr.ip,
+                               ct_value->origin.sport);
+    } else {
+        ret = ipv4_update_csum_l3(skb, l3_off, ct_key.external.saddr.ip,
+                                  ct_value->origin.saddr.ip);
+    }
     if (ret) {
         bpf_log_error("failed to update csum, err:%d", ret);
         return TC_ACT_SHOT;
@@ -668,10 +769,9 @@ int egress_snat(struct __sk_buff *skb) {
         goto check_hairpin;
     }
 
-    if (pkt.frag_type != FRAG_NONE || !pkt.first_fragment) {
-        // TODO: fragmentation tracking
-        bpf_log_warn("fragmentation tracking not supported yet, dropping");
-        return TC_ACT_SHOT;
+    if ((ret = fragment_track(skb, &pkt, FRAG_TRACK_EGRESS_FLAG)) !=
+        TC_ACT_OK) {
+        return ret;
     }
 
     struct ipv4_lpm_key ext_key = {.prefixlen = 32, .ip = pkt.tuple.saddr.ip};
@@ -794,11 +894,18 @@ int egress_snat(struct __sk_buff *skb) {
     u32 l4_off = (void *)pkt.udph - (void *)pkt.eth;
 
     pkt.iph->saddr = ct_key.external.saddr.ip;
-    pkt.udph->source = ct_key.external.sport;
 
-    ret = ipv4_update_csum(skb, l3_off, l4_off, ct_value->origin.saddr.ip,
-                           ct_value->origin.sport, ct_key.external.saddr.ip,
-                           ct_key.external.sport);
+    if (pkt.first_fragment) {
+        pkt.udph->source = ct_key.external.sport;
+
+        ret = ipv4_update_csum(skb, l3_off, l4_off, ct_value->origin.saddr.ip,
+                               ct_value->origin.sport, ct_key.external.saddr.ip,
+                               ct_key.external.sport);
+    } else {
+        ret = ipv4_update_csum_l3(skb, l3_off, ct_value->origin.saddr.ip,
+                                  ct_key.external.saddr.ip);
+    }
+
     if (ret) {
         bpf_log_error("failed to update csum, err:%d", ret);
         return TC_ACT_SHOT;

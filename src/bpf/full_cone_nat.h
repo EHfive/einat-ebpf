@@ -109,7 +109,8 @@ struct map_frag_track_key {
     u32 ifindex;
     u8 flags;
     u8 l4proto;
-    __be16 id;
+    u8 _pad[2];
+    u32 id;
     union u_inet_addr saddr;
     union u_inet_addr daddr;
 };
