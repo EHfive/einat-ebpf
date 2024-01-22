@@ -12,15 +12,41 @@
 #define ETH_P_IP 0x0800
 #define ETH_P_IPV6 0x86DD
 
-// #include <linux/pkt_cls.h>
-#define TC_ACT_UNSPEC (-1)
-#define TC_ACT_OK 0
-#define TC_ACT_SHOT 2
+#define IP_CE 0x8000     /* Flag: "Congestion"		*/
+#define IP_DF 0x4000     /* Flag: "Don't Fragment"	*/
+#define IP_MF 0x2000     /* Flag: "More Fragments"	*/
+#define IP_OFFSET 0x1FFF /* "Fragment Offset" part	*/
+
+#define MAX_IPV6_EXT_NUM 6
+
+/*
+ *	NextHeader field of IPv6 header
+ */
+
+#define NEXTHDR_HOP 0       /* Hop-by-hop option header. */
+#define NEXTHDR_ROUTING 43  /* Routing header. */
+#define NEXTHDR_FRAGMENT 44 /* Fragmentation/reassembly header. */
+#define NEXTHDR_AUTH 51     /* Authentication header. */
+#define NEXTHDR_DEST 60     /* Destination options header. */
+
+#define NEXTHDR_TCP 6        /* TCP segment. */
+#define NEXTHDR_UDP 17       /* UDP message. */
+#define NEXTHDR_ICMP 58     /* ICMP for IPv6. */
+#define NEXTHDR_NONE 59     /* No next header */
+#define NEXTHDR_SCTP 132     /* SCTP message. */
+
+#define IPV6_FRAG_OFFSET 0xFFF8
+#define IPV6_FRAG_MF 0x0001
 
 #define AF_INET 2
 #define AF_INET6 10
 
 #define CLOCK_MONOTONIC 1
+
+// #include <linux/pkt_cls.h>
+#define TC_ACT_UNSPEC (-1)
+#define TC_ACT_OK 0
+#define TC_ACT_SHOT 2
 
 #define BPF_LOOP_RET_CONTINUE 0
 #define BPF_LOOP_RET_BREAK 1

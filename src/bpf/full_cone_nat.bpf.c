@@ -61,9 +61,13 @@ struct {
 
 struct packet_info {
     u8 is_ipv4;
-    u8 l4proto;
-    u8 is_fragment;
-    __be16 id;
+    u8 nexthdr;
+#define FRAG_NONE 0
+#define FRAG_MORE 1
+#define FRAG_LAST 2
+    u8 frag_type;
+    u16 frag_off;
+    u32 frag_id;
     struct inet_tuple tuple;
     struct ethhdr *eth;
     union {
@@ -75,71 +79,146 @@ struct packet_info {
         struct udphdr *udph;
         struct icmphdr *icmph;
         struct icmp6hdr *icmp6h;
+        void *first_fragment;
     };
 };
 
-static __always_inline int parse_packet(const struct __sk_buff *skb,
-                                        struct packet_info *pkt) {
+static __always_inline void *parse_ipv4_packet(struct packet_info *pkt,
+                                               const void *data_end) {
+
+    pkt->iph = (struct iphdr *)((void *)pkt->eth + sizeof(*pkt->eth));
+    if ((void *)(pkt->iph + 1) > data_end) {
+        return NULL;
+    }
+    pkt->tuple.saddr.ip = pkt->iph->saddr;
+    pkt->tuple.daddr.ip = pkt->iph->daddr;
+    pkt->is_ipv4 = true;
+    pkt->frag_off = bpf_ntohs((pkt->iph->frag_off & bpf_htons(IP_OFFSET)) << 3);
+    if (pkt->iph->frag_off & bpf_htons(IP_MF)) {
+        pkt->frag_type = FRAG_MORE;
+    } else if (pkt->frag_off) {
+        pkt->frag_type = FRAG_LAST;
+    } else {
+        pkt->frag_type = FRAG_NONE;
+    }
+    pkt->frag_id = bpf_ntohs(pkt->iph->id);
+    pkt->nexthdr = pkt->iph->protocol;
+    return (void *)pkt->iph + (pkt->iph->ihl * 4);
+}
+
+static __always_inline void *parse_ipv6_packet(struct packet_info *pkt,
+                                               const void *data_end) {
+    pkt->ip6h = (struct ipv6hdr *)((void *)pkt->eth + sizeof(*pkt->eth));
+    if ((void *)(pkt->ip6h + 1) > data_end) {
+        return NULL;
+    }
+    COPY_ADDR6(pkt->tuple.saddr.ip6, pkt->ip6h->saddr.in6_u.u6_addr32);
+    COPY_ADDR6(pkt->tuple.daddr.ip6, pkt->ip6h->daddr.in6_u.u6_addr32);
+    pkt->is_ipv4 = false;
+
+    struct frag_hdr *frag_hdr = NULL;
+    int len = sizeof(struct ipv6hdr);
+    u8 nexthdr = pkt->ip6h->nexthdr;
+
+#pragma unroll
+    for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
+        switch (nexthdr) {
+        case NEXTHDR_FRAGMENT:
+            frag_hdr = (struct frag_hdr *)((void *)pkt->ip6h + len);
+        case NEXTHDR_HOP:
+        case NEXTHDR_ROUTING:
+        case NEXTHDR_AUTH:
+        case NEXTHDR_DEST: {
+            struct ipv6_opt_hdr *opthdr =
+                (struct ipv6_opt_hdr *)((void *)pkt->ip6h + len);
+            if ((void *)(opthdr + 1) > data_end) {
+                return NULL;
+            }
+            if (nexthdr == NEXTHDR_AUTH) {
+                len += (opthdr->hdrlen + 2) * 4;
+            } else {
+                len += (opthdr->hdrlen + 1) * 8;
+            }
+            nexthdr = opthdr->nexthdr;
+            break;
+        }
+        default:
+            goto found_upper_layer;
+        }
+    }
+    return NULL;
+
+found_upper_layer:
+    if (frag_hdr) {
+        if ((void *)(frag_hdr + 1) > data_end) {
+            return NULL;
+        }
+        pkt->frag_id = bpf_ntohl(frag_hdr->identification);
+        pkt->frag_off =
+            bpf_ntohs(frag_hdr->frag_off & bpf_htons(IPV6_FRAG_OFFSET));
+
+        if (frag_hdr->frag_off & bpf_htons(IPV6_FRAG_MF)) {
+            pkt->frag_type = FRAG_MORE;
+        } else if (pkt->frag_off) {
+            pkt->frag_type = FRAG_LAST;
+        } else {
+            // This packet is the last fragment but also the first
+            // fragment as fragmentation offset is 0, so just ignore
+            // the fragmentation.
+            pkt->frag_type = FRAG_NONE;
+        }
+    }
+    pkt->nexthdr = nexthdr;
+    return (void *)pkt->ip6h + len;
+}
+
+static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
     void *data_end = (void *)(long)skb->data_end;
     pkt->eth = (struct ethhdr *)(void *)(long)skb->data;
-
-    void *trans_data;
-    __be16 src_port = 0;
-    __be16 dst_port = 0;
-
     if ((void *)(pkt->eth + 1) > data_end) {
         return TC_ACT_SHOT;
     }
 
+    void *trans_data;
     if (pkt->eth->h_proto == bpf_htons(ETH_P_IP)) {
-        pkt->iph = (struct iphdr *)((void *)pkt->eth + sizeof(*pkt->eth));
-        if ((void *)(pkt->iph + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
-
-        pkt->tuple.saddr.ip = pkt->iph->saddr;
-        pkt->tuple.daddr.ip = pkt->iph->daddr;
-        pkt->is_ipv4 = true;
-        pkt->l4proto = pkt->iph->protocol;
-        trans_data = (void *)pkt->iph + (pkt->iph->ihl * 4);
+        trans_data = parse_ipv4_packet(pkt, data_end);
     } else if (pkt->eth->h_proto == bpf_htons(ETH_P_IPV6)) {
-        pkt->ip6h = (struct ipv6hdr *)((void *)pkt->eth + sizeof(*pkt->eth));
-        if ((void *)(pkt->ip6h + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
-
-        COPY_ADDR6(pkt->tuple.saddr.ip6, pkt->ip6h->saddr.in6_u.u6_addr32);
-        COPY_ADDR6(pkt->tuple.daddr.ip6, pkt->ip6h->daddr.in6_u.u6_addr32);
-        pkt->is_ipv4 = false;
-        // FIXME: iterate nexthdr to find out fragmentation header and/or L4
-        // protocol header
-        pkt->l4proto = pkt->ip6h->nexthdr;
-        trans_data = pkt->ip6h + 1;
+        trans_data = parse_ipv6_packet(pkt, data_end);
     } else {
         return TC_ACT_UNSPEC;
     }
 
-    if (pkt->l4proto == IPPROTO_TCP) {
+    if (trans_data == NULL) {
+        return TC_ACT_SHOT;
+    }
+
+    if (pkt->frag_type != FRAG_NONE && pkt->frag_off != 0) {
+        pkt->first_fragment = NULL;
+        // not the first fragment
+        return TC_ACT_OK;
+    }
+
+    if (pkt->nexthdr == IPPROTO_TCP) {
         pkt->tcph = trans_data;
         if ((void *)(pkt->tcph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
         pkt->tuple.sport = pkt->tcph->source;
         pkt->tuple.dport = pkt->tcph->dest;
-    } else if (pkt->l4proto == IPPROTO_UDP) {
+    } else if (pkt->nexthdr == IPPROTO_UDP) {
         pkt->udph = trans_data;
         if ((void *)(pkt->udph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
         pkt->tuple.sport = pkt->udph->source;
         pkt->tuple.dport = pkt->udph->dest;
-    } else if (pkt->is_ipv4 && pkt->l4proto == IPPROTO_ICMP) {
+    } else if (pkt->is_ipv4 && pkt->nexthdr == IPPROTO_ICMP) {
         pkt->icmph = trans_data;
         if ((void *)(pkt->icmph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
         // TODO: parse ICMP content
-    } else if (!pkt->is_ipv4 && pkt->l4proto == NEXTHDR_ICMP) {
+    } else if (!pkt->is_ipv4 && pkt->nexthdr == NEXTHDR_ICMP) {
         pkt->icmp6h = trans_data;
         if ((void *)(pkt->icmp6h + 1) > data_end) {
             return TC_ACT_SHOT;
@@ -314,7 +393,7 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    if (pkt.l4proto != IPPROTO_UDP || !pkt.is_ipv4) {
+    if (pkt.nexthdr != IPPROTO_UDP || !pkt.is_ipv4) {
         return TC_ACT_UNSPEC;
     }
 
@@ -323,6 +402,12 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         bpf_map_lookup_elem(&map_ipv4_dest_config, &dest_key);
     if (dest_config && (dest_config->flags & DEST_NO_SNAT_FLAG)) {
         return TC_ACT_UNSPEC;
+    }
+
+    if (pkt.frag_type != FRAG_NONE || !pkt.first_fragment) {
+        // TODO: fragmentation tracking
+        bpf_log_warn("fragmentation tracking not supported yet, dropping");
+        return TC_ACT_SHOT;
     }
 
     struct ipv4_lpm_key ext_key = {.prefixlen = 32, .ip = pkt.tuple.daddr.ip};
@@ -353,7 +438,7 @@ int ingress_rev_snat(struct __sk_buff *skb) {
     struct map_ct_key ct_key = {
         .ifindex = skb->ifindex,
         .flags = ADDR_IPV4_FLAG,
-        .l4proto = pkt.l4proto,
+        .l4proto = pkt.nexthdr,
     };
     inet_tuple_rev_copy(&ct_key.external, &pkt.tuple);
 
@@ -362,7 +447,7 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         struct map_binding_key b_key = {
             .ifindex = skb->ifindex,
             .flags = ADDR_IPV4_FLAG,
-            .l4proto = pkt.l4proto,
+            .l4proto = pkt.nexthdr,
             .from_port = pkt.tuple.dport,
             .from_addr = pkt.tuple.daddr,
         };
@@ -395,7 +480,7 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         struct map_binding_key b_key = {
             .ifindex = skb->ifindex,
             .flags = ADDR_IPV4_FLAG,
-            .l4proto = pkt.l4proto,
+            .l4proto = pkt.nexthdr,
             .from_port = pkt.tuple.dport,
             .from_addr = pkt.tuple.daddr,
         };
@@ -572,7 +657,7 @@ int egress_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.l4proto != IPPROTO_UDP || !pkt.is_ipv4) {
+    if (pkt.nexthdr != IPPROTO_UDP || !pkt.is_ipv4) {
         return TC_ACT_UNSPEC;
     }
 
@@ -581,6 +666,12 @@ int egress_snat(struct __sk_buff *skb) {
         bpf_map_lookup_elem(&map_ipv4_dest_config, &dest_key);
     if (dest_config && (dest_config->flags & DEST_NO_SNAT_FLAG)) {
         goto check_hairpin;
+    }
+
+    if (pkt.frag_type != FRAG_NONE || !pkt.first_fragment) {
+        // TODO: fragmentation tracking
+        bpf_log_warn("fragmentation tracking not supported yet, dropping");
+        return TC_ACT_SHOT;
     }
 
     struct ipv4_lpm_key ext_key = {.prefixlen = 32, .ip = pkt.tuple.saddr.ip};
@@ -609,7 +700,7 @@ int egress_snat(struct __sk_buff *skb) {
             // ICMP ID remapping for external IP is needed as Linux allows
             // setting arbitrary ICMP ID which would cause collision with ICMP
             // ID binding of other internal source.
-            if (pkt.l4proto == IPPROTO_UDP || pkt.l4proto != IPPROTO_TCP) {
+            if (pkt.nexthdr == IPPROTO_UDP || pkt.nexthdr != IPPROTO_TCP) {
                 return TC_ACT_SHOT;
             }
         }
@@ -619,7 +710,7 @@ int egress_snat(struct __sk_buff *skb) {
     struct map_binding_key b_key = {
         .ifindex = skb->ifindex,
         .flags = BINDING_ORIG_DIR_FLAG | ADDR_IPV4_FLAG,
-        .l4proto = pkt.l4proto,
+        .l4proto = pkt.nexthdr,
         .from_port = pkt.tuple.sport,
         .from_addr = pkt.tuple.saddr,
     };
