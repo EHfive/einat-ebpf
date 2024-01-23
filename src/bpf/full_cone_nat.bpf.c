@@ -10,6 +10,10 @@
 // g_ipv4_external_addr, requires Linux kernel>=6.7
 const volatile u8 ENABLE_FIB_LOOKUP_SRC = 0;
 
+// at least FRAGMENT_MIN=2s,
+// https://datatracker.ietf.org/doc/html/rfc6146#section-4
+const volatile u64 TIMEOUT_FRAGMENT = 2E9;
+
 u32 g_ipv4_external_addr SEC(".data") = 0;
 u8 g_log_level SEC(".data") = BPF_LOG_LEVEL_DEBUG;
 
@@ -60,7 +64,7 @@ struct {
 } map_ct SEC(".maps");
 
 struct packet_info {
-    u8 is_ipv4;
+    bool is_ipv4;
     u8 nexthdr;
 #define FRAG_NONE 0
 #define FRAG_MORE 1
@@ -69,72 +73,61 @@ struct packet_info {
     u16 frag_off;
     u32 frag_id;
     struct inet_tuple tuple;
-    // XXX: save offsets only and don't reference skb data directly to ease
-    // verification?
-    struct ethhdr *eth;
-    union {
-        struct iphdr *iph;
-        struct ipv6hdr *ip6h;
-    };
-    union {
-        struct tcphdr *tcph;
-        struct udphdr *udph;
-        struct icmphdr *icmph;
-        struct icmp6hdr *icmp6h;
-        void *first_fragment;
-    };
+    int l3_off;
+    int l4_off;
 };
 
-static __always_inline void *parse_ipv4_packet(struct packet_info *pkt,
-                                               const void *data_end) {
-
-    pkt->iph = (struct iphdr *)((void *)pkt->eth + sizeof(*pkt->eth));
-    if ((void *)(pkt->iph + 1) > data_end) {
-        return NULL;
+static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
+                                             const struct ethhdr *eth,
+                                             const void *data_end) {
+    struct iphdr *iph = (struct iphdr *)((void *)eth + sizeof(*eth));
+    if ((void *)(iph + 1) > data_end) {
+        return -1;
     }
-    pkt->tuple.saddr.ip = pkt->iph->saddr;
-    pkt->tuple.daddr.ip = pkt->iph->daddr;
+    pkt->tuple.saddr.ip = iph->saddr;
+    pkt->tuple.daddr.ip = iph->daddr;
     pkt->is_ipv4 = true;
-    pkt->frag_off = bpf_ntohs((pkt->iph->frag_off & bpf_htons(IP_OFFSET)) << 3);
-    if (pkt->iph->frag_off & bpf_htons(IP_MF)) {
+    pkt->frag_off = bpf_ntohs((iph->frag_off & bpf_htons(IP_OFFSET)) << 3);
+    if (iph->frag_off & bpf_htons(IP_MF)) {
         pkt->frag_type = FRAG_MORE;
     } else if (pkt->frag_off) {
         pkt->frag_type = FRAG_LAST;
     } else {
         pkt->frag_type = FRAG_NONE;
     }
-    pkt->frag_id = bpf_ntohs(pkt->iph->id);
-    pkt->nexthdr = pkt->iph->protocol;
-    return (void *)pkt->iph + (pkt->iph->ihl * 4);
+    pkt->frag_id = bpf_ntohs(iph->id);
+    pkt->nexthdr = iph->protocol;
+    return (iph->ihl * 4);
 }
 
-static __always_inline void *parse_ipv6_packet(struct packet_info *pkt,
-                                               const void *data_end) {
-    pkt->ip6h = (struct ipv6hdr *)((void *)pkt->eth + sizeof(*pkt->eth));
-    if ((void *)(pkt->ip6h + 1) > data_end) {
-        return NULL;
+static __always_inline int parse_ipv6_packet(struct packet_info *pkt,
+                                             const struct ethhdr *eth,
+                                             const void *data_end) {
+    struct ipv6hdr *ip6h = (struct ipv6hdr *)((void *)eth + sizeof(*eth));
+    if ((void *)(ip6h + 1) > data_end) {
+        return -1;
     }
-    COPY_ADDR6(pkt->tuple.saddr.ip6, pkt->ip6h->saddr.in6_u.u6_addr32);
-    COPY_ADDR6(pkt->tuple.daddr.ip6, pkt->ip6h->daddr.in6_u.u6_addr32);
+    COPY_ADDR6(pkt->tuple.saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
+    COPY_ADDR6(pkt->tuple.daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
     pkt->is_ipv4 = false;
 
     struct frag_hdr *frag_hdr = NULL;
     int len = sizeof(struct ipv6hdr);
-    u8 nexthdr = pkt->ip6h->nexthdr;
+    u8 nexthdr = ip6h->nexthdr;
 
 #pragma unroll
     for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
         switch (nexthdr) {
         case NEXTHDR_FRAGMENT:
-            frag_hdr = (struct frag_hdr *)((void *)pkt->ip6h + len);
+            frag_hdr = (struct frag_hdr *)((void *)ip6h + len);
         case NEXTHDR_HOP:
         case NEXTHDR_ROUTING:
         case NEXTHDR_AUTH:
         case NEXTHDR_DEST: {
             struct ipv6_opt_hdr *opthdr =
-                (struct ipv6_opt_hdr *)((void *)pkt->ip6h + len);
+                (struct ipv6_opt_hdr *)((void *)ip6h + len);
             if ((void *)(opthdr + 1) > data_end) {
-                return NULL;
+                return -1;
             }
             if (nexthdr == NEXTHDR_AUTH) {
                 len += (opthdr->hdrlen + 2) * 4;
@@ -148,12 +141,12 @@ static __always_inline void *parse_ipv6_packet(struct packet_info *pkt,
             goto found_upper_layer;
         }
     }
-    return NULL;
+    return -1;
 
 found_upper_layer:
     if (frag_hdr) {
         if ((void *)(frag_hdr + 1) > data_end) {
-            return NULL;
+            return -1;
         }
         pkt->frag_id = bpf_ntohl(frag_hdr->identification);
         pkt->frag_off =
@@ -171,59 +164,62 @@ found_upper_layer:
         }
     }
     pkt->nexthdr = nexthdr;
-    return (void *)pkt->ip6h + len;
+    return len;
 }
 
-// not inline to speedup eBPF verification
+// not inline to reduce eBPF verification branches
 static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
     void *data_end = (void *)(long)skb->data_end;
-    pkt->eth = (struct ethhdr *)(void *)(long)skb->data;
-    if ((void *)(pkt->eth + 1) > data_end) {
+    struct ethhdr *eth = (struct ethhdr *)(void *)(long)skb->data;
+    if ((void *)(eth + 1) > data_end) {
         return TC_ACT_SHOT;
     }
+    pkt->l3_off = sizeof(*eth);
 
-    void *trans_data;
-    if (pkt->eth->h_proto == bpf_htons(ETH_P_IP)) {
-        trans_data = parse_ipv4_packet(pkt, data_end);
-    } else if (pkt->eth->h_proto == bpf_htons(ETH_P_IPV6)) {
-        trans_data = parse_ipv6_packet(pkt, data_end);
+    int l3_header_len;
+    if (eth->h_proto == bpf_htons(ETH_P_IP)) {
+        l3_header_len = parse_ipv4_packet(pkt, eth, data_end);
+    } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
+        l3_header_len = parse_ipv6_packet(pkt, eth, data_end);
     } else {
         return TC_ACT_UNSPEC;
     }
 
-    if (trans_data == NULL) {
+    if (l3_header_len < 0) {
         return TC_ACT_SHOT;
     }
 
     if (pkt->frag_type != FRAG_NONE && pkt->frag_off != 0) {
-        pkt->first_fragment = NULL;
         // not the first fragment
+        pkt->l4_off = -1;
         return TC_ACT_OK;
     }
+    pkt->l4_off = pkt->l3_off + l3_header_len;
 
+    void *trans_data = (void *)eth + pkt->l4_off;
     if (pkt->nexthdr == IPPROTO_TCP) {
-        pkt->tcph = trans_data;
-        if ((void *)(pkt->tcph + 1) > data_end) {
+        struct tcphdr *tcph = trans_data;
+        if ((void *)(tcph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
-        pkt->tuple.sport = pkt->tcph->source;
-        pkt->tuple.dport = pkt->tcph->dest;
+        pkt->tuple.sport = tcph->source;
+        pkt->tuple.dport = tcph->dest;
     } else if (pkt->nexthdr == IPPROTO_UDP) {
-        pkt->udph = trans_data;
-        if ((void *)(pkt->udph + 1) > data_end) {
+        struct udphdr *udph = trans_data;
+        if ((void *)(udph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
-        pkt->tuple.sport = pkt->udph->source;
-        pkt->tuple.dport = pkt->udph->dest;
+        pkt->tuple.sport = udph->source;
+        pkt->tuple.dport = udph->dest;
     } else if (pkt->is_ipv4 && pkt->nexthdr == IPPROTO_ICMP) {
-        pkt->icmph = trans_data;
-        if ((void *)(pkt->icmph + 1) > data_end) {
+        struct icmphdr *icmph = trans_data;
+        if ((void *)(icmph + 1) > data_end) {
             return TC_ACT_SHOT;
         }
         // TODO: parse ICMP content
     } else if (!pkt->is_ipv4 && pkt->nexthdr == NEXTHDR_ICMP) {
-        pkt->icmp6h = trans_data;
-        if ((void *)(pkt->icmp6h + 1) > data_end) {
+        struct icmp6hdr *icmp6h = trans_data;
+        if ((void *)(icmp6h + 1) > data_end) {
             return TC_ACT_SHOT;
         }
         // TODO: parse ICMPv6 content
@@ -250,7 +246,7 @@ static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
     if (pkt->frag_type == FRAG_NONE ||
         pkt->frag_type == FRAG_LAST && pkt->frag_off == 0) {
         // this is an atomic packet
-        return pkt->first_fragment ? TC_ACT_OK : TC_ACT_UNSPEC;
+        return pkt->l4_off >= 0 ? TC_ACT_OK : TC_ACT_UNSPEC;
     }
 
     int ret;
@@ -264,8 +260,7 @@ static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
     };
 
     struct map_frag_track_value *value;
-    if (pkt->frag_type == FRAG_MORE && pkt->first_fragment &&
-        pkt->frag_off == 0) {
+    if (pkt->frag_type == FRAG_MORE && pkt->l4_off >= 0) {
         struct map_frag_track_value value_new = {
             .sport = pkt->tuple.sport,
             .dport = pkt->tuple.dport,
@@ -306,8 +301,7 @@ static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
         pkt->tuple.dport = value->dport;
     }
 
-    ret = bpf_timer_start(&value->timer,
-                          pkt->frag_type == FRAG_LAST ? 5E9 : 30E9, 0);
+    ret = bpf_timer_start(&value->timer, TIMEOUT_FRAGMENT, 0);
     if (ret) {
         bpf_log_error("failed to start timer, err:%d", ret);
         goto delete_entry;
@@ -594,19 +588,19 @@ int ingress_rev_snat(struct __sk_buff *skb) {
 
     // modify dest
 
-    u32 l3_off = (void *)pkt.iph - (void *)pkt.eth;
-    u32 l4_off = (void *)pkt.udph - (void *)pkt.eth;
-
-    pkt.iph->daddr = ct_value->origin.saddr.ip;
-
-    if (pkt.first_fragment) {
-        pkt.udph->dest = ct_value->origin.sport;
-
-        ret = ipv4_update_csum(skb, l3_off, l4_off, ct_key.external.saddr.ip,
-                               ct_key.external.sport, ct_value->origin.saddr.ip,
-                               ct_value->origin.sport);
+    bpf_skb_store_bytes(skb, pkt.l3_off + offsetof(struct iphdr, daddr),
+                        &ct_value->origin.saddr.ip,
+                        sizeof(ct_value->origin.saddr.ip), 0);
+    if (pkt.l4_off >= 0) {
+        bpf_skb_store_bytes(skb, pkt.l4_off + offsetof(struct udphdr, dest),
+                            &ct_value->origin.sport,
+                            sizeof(ct_value->origin.sport), 0);
+        ret =
+            ipv4_update_csum(skb, pkt.l3_off, pkt.l4_off,
+                             ct_key.external.saddr.ip, ct_key.external.sport,
+                             ct_value->origin.saddr.ip, ct_value->origin.sport);
     } else {
-        ret = ipv4_update_csum_l3(skb, l3_off, ct_key.external.saddr.ip,
+        ret = ipv4_update_csum_l3(skb, pkt.l3_off, ct_key.external.saddr.ip,
                                   ct_value->origin.saddr.ip);
     }
     if (ret) {
@@ -890,19 +884,19 @@ int egress_snat(struct __sk_buff *skb) {
         bpf_log_debug("found existing inbound initialized CT");
     }
 
-    u32 l3_off = (void *)pkt.iph - (void *)pkt.eth;
-    u32 l4_off = (void *)pkt.udph - (void *)pkt.eth;
-
-    pkt.iph->saddr = ct_key.external.saddr.ip;
-
-    if (pkt.first_fragment) {
-        pkt.udph->source = ct_key.external.sport;
-
-        ret = ipv4_update_csum(skb, l3_off, l4_off, ct_value->origin.saddr.ip,
-                               ct_value->origin.sport, ct_key.external.saddr.ip,
-                               ct_key.external.sport);
+    bpf_skb_store_bytes(skb, pkt.l3_off + offsetof(struct iphdr, saddr),
+                        &ct_key.external.saddr.ip,
+                        sizeof(ct_key.external.saddr.ip), 0);
+    if (pkt.l4_off >= 0) {
+        bpf_skb_store_bytes(skb, pkt.l4_off + offsetof(struct udphdr, source),
+                            &ct_key.external.sport,
+                            sizeof(ct_key.external.sport), 0);
+        ret =
+            ipv4_update_csum(skb, pkt.l3_off, pkt.l4_off,
+                             ct_value->origin.saddr.ip, ct_value->origin.sport,
+                             ct_key.external.saddr.ip, ct_key.external.sport);
     } else {
-        ret = ipv4_update_csum_l3(skb, l3_off, ct_value->origin.saddr.ip,
+        ret = ipv4_update_csum_l3(skb, pkt.l3_off, ct_value->origin.saddr.ip,
                                   ct_key.external.saddr.ip);
     }
 
