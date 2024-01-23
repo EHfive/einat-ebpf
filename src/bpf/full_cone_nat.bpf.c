@@ -75,15 +75,35 @@ struct packet_info {
     struct inet_tuple tuple;
     int l3_off;
     int l4_off;
+    // ICMP error message
+    u8 err_nexthdr;
+    int err_l3_off;
+    int err_l4_off;
 };
 
-static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
-                                             const struct ethhdr *eth,
-                                             const void *data_end) {
-    struct iphdr *iph = (struct iphdr *)((void *)eth + sizeof(*eth));
-    if ((void *)(iph + 1) > data_end) {
+static __always_inline bool is_icmpx(u8 nexthdr) {
+    return nexthdr == IPPROTO_ICMP || nexthdr == NEXTHDR_ICMP;
+}
+static __always_inline bool is_icmpx_error_pkt(const struct packet_info *pkt) {
+    return is_icmpx(pkt->nexthdr) && pkt->l4_off >= 0 && pkt->err_l3_off >= 0;
+}
+
+static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
+                                                   const void *data_end,
+                                                   struct inet_tuple *tuple,
+                                                   u8 *nexthdr) {
+    tuple->saddr.ip = iph->saddr;
+    tuple->daddr.ip = iph->daddr;
+    *nexthdr = iph->protocol;
+    if (iph->frag_off & bpf_htons(IP_OFFSET)) {
         return -1;
     }
+    return (iph->ihl * 4);
+}
+
+static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
+                                             const struct iphdr *iph,
+                                             const void *data_end) {
     pkt->tuple.saddr.ip = iph->saddr;
     pkt->tuple.daddr.ip = iph->daddr;
     pkt->is_ipv4 = true;
@@ -100,13 +120,58 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     return (iph->ihl * 4);
 }
 
-static __always_inline int parse_ipv6_packet(struct packet_info *pkt,
-                                             const struct ethhdr *eth,
-                                             const void *data_end) {
-    struct ipv6hdr *ip6h = (struct ipv6hdr *)((void *)eth + sizeof(*eth));
-    if ((void *)(ip6h + 1) > data_end) {
-        return -1;
+static __always_inline int parse_ipv6_packet_light(const struct ipv6hdr *ip6h,
+                                                   const void *data_end,
+                                                   struct inet_tuple *tuple,
+                                                   u8 *nexthdr) {
+    COPY_ADDR6(tuple->saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
+    COPY_ADDR6(tuple->daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
+
+    struct frag_hdr *frag_hdr = NULL;
+    int len = sizeof(struct ipv6hdr);
+#pragma unroll
+    for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
+        switch (*nexthdr) {
+        case NEXTHDR_FRAGMENT:
+            frag_hdr = (struct frag_hdr *)((void *)ip6h + len);
+        case NEXTHDR_HOP:
+        case NEXTHDR_ROUTING:
+        case NEXTHDR_AUTH:
+        case NEXTHDR_DEST: {
+            struct ipv6_opt_hdr *opthdr =
+                (struct ipv6_opt_hdr *)((void *)ip6h + len);
+            if ((void *)(opthdr + 1) > data_end) {
+                return -1;
+            }
+            if (*nexthdr == NEXTHDR_AUTH) {
+                len += (opthdr->hdrlen + 2) * 4;
+            } else {
+                len += (opthdr->hdrlen + 1) * 8;
+            }
+            *nexthdr = opthdr->nexthdr;
+            break;
+        }
+        default:
+            goto found_upper_layer;
+        }
     }
+    return -1;
+
+found_upper_layer:
+    if (frag_hdr) {
+        if ((void *)(frag_hdr + 1) > data_end) {
+            return -1;
+        }
+        if (frag_hdr->frag_off & bpf_htons(IPV6_FRAG_OFFSET)) {
+            return -1;
+        }
+    }
+    return len;
+}
+
+static __always_inline int parse_ipv6_packet(struct packet_info *pkt,
+                                             const struct ipv6hdr *ip6h,
+                                             const void *data_end) {
     COPY_ADDR6(pkt->tuple.saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
     COPY_ADDR6(pkt->tuple.daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
     pkt->is_ipv4 = false;
@@ -167,8 +232,120 @@ found_upper_layer:
     return len;
 }
 
+enum {
+    ICMP_ERROR_MSG,
+    ICMP_QUERY_MSG,
+    ICMP_ACT_UNSPEC,
+    ICMP_ACT_SHOT,
+};
+static __always_inline int icmpx_msg_type(bool is_ipv4, u8 nexthdr,
+                                          void *trans_data, void *data_end) {
+    if (nexthdr == IPPROTO_ICMP) {
+        if (!is_ipv4) {
+            return ICMP_ACT_SHOT;
+        }
+        struct icmphdr *icmph = trans_data;
+        if ((void *)(icmph + 1) > data_end) {
+            return ICMP_ACT_SHOT;
+        }
+        switch (icmph->type) {
+        case ICMP_DEST_UNREACH:
+        case ICMP_TIME_EXCEEDED:
+        case ICMP_PARAMETERPROB:
+            return ICMP_ERROR_MSG;
+        case ICMP_ECHOREPLY:
+        case ICMP_ECHO:
+        case ICMP_TIMESTAMP:
+        case ICMP_TIMESTAMPREPLY:
+            return ICMP_QUERY_MSG;
+        }
+    } else if (nexthdr == NEXTHDR_ICMP) {
+        if (is_ipv4) {
+            return TC_ACT_SHOT;
+        }
+        struct icmp6hdr *icmp6h = trans_data;
+        if ((void *)(icmp6h + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        switch (icmp6h->icmp6_type) {
+        case ICMPV6_DEST_UNREACH:
+        case ICMPV6_PKT_TOOBIG:
+        case ICMPV6_TIME_EXCEED:
+        case ICMPV6_PARAMPROB:
+            return ICMP_ERROR_MSG;
+        case ICMPV6_ECHO_REQUEST:
+        case ICMPV6_ECHO_REPLY:
+            return ICMP_QUERY_MSG;
+        }
+    }
+    return ICMP_ACT_UNSPEC;
+}
+
+static __always_inline __be16 get_icmpx_query_id(struct icmphdr *icmph) {
+    return icmph->un.echo.id;
+}
+
+static __always_inline int parse_packet_light(bool is_ipv4, void *err_l3_data,
+                                              void *data_end,
+                                              struct inet_tuple *tuple,
+                                              u8 *nexthdr, int *l3_hdr_len) {
+    if (is_ipv4) {
+        struct iphdr *iph = err_l3_data;
+        if ((void *)(iph + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        *l3_hdr_len = parse_ipv4_packet_light(iph, data_end, tuple, nexthdr);
+    } else {
+        struct ipv6hdr *ip6h = err_l3_data;
+        if ((void *)(ip6h + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        *l3_hdr_len = parse_ipv6_packet_light(ip6h, data_end, tuple, nexthdr);
+    }
+    if (*l3_hdr_len < 0) {
+        return TC_ACT_SHOT;
+    }
+
+    void *trans_data = err_l3_data + *l3_hdr_len;
+    if (*nexthdr == IPPROTO_TCP) {
+        struct tcphdr *tcph = trans_data;
+        if ((void *)(tcph + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        tuple->sport = tcph->source;
+        tuple->dport = tcph->dest;
+    } else if (*nexthdr == IPPROTO_UDP) {
+        struct udphdr *udph = trans_data;
+        if ((void *)(udph + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        tuple->sport = udph->source;
+        tuple->dport = udph->dest;
+    } else if (is_icmpx(*nexthdr)) {
+        int ret = icmpx_msg_type(is_ipv4, *nexthdr, trans_data, data_end);
+        switch (ret) {
+        case ICMP_QUERY_MSG: {
+            tuple->sport = tuple->dport = get_icmpx_query_id(trans_data);
+            break;
+        }
+        case ICMP_ERROR_MSG:
+            // not parsing nested ICMP error
+        case ICMP_ACT_UNSPEC:
+            // ICMP message not parsed
+            return TC_ACT_UNSPEC;
+        case ICMP_ACT_SHOT:
+            return TC_ACT_SHOT;
+        }
+    } else {
+        return TC_ACT_UNSPEC;
+    }
+
+    return TC_ACT_OK;
+}
+
 // not inline to reduce eBPF verification branches
 static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
+#define BPF_LOG_TOPIC "parse_packet"
     void *data_end = (void *)(long)skb->data_end;
     struct ethhdr *eth = (struct ethhdr *)(void *)(long)skb->data;
     if ((void *)(eth + 1) > data_end) {
@@ -178,9 +355,17 @@ static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
 
     int l3_header_len;
     if (eth->h_proto == bpf_htons(ETH_P_IP)) {
-        l3_header_len = parse_ipv4_packet(pkt, eth, data_end);
+        struct iphdr *iph = (struct iphdr *)((void *)eth + sizeof(*eth));
+        if ((void *)(iph + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        l3_header_len = parse_ipv4_packet(pkt, iph, data_end);
     } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
-        l3_header_len = parse_ipv6_packet(pkt, eth, data_end);
+        struct ipv6hdr *ip6h = (struct ipv6hdr *)((void *)eth + sizeof(*eth));
+        if ((void *)(ip6h + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        l3_header_len = parse_ipv6_packet(pkt, ip6h, data_end);
     } else {
         return TC_ACT_UNSPEC;
     }
@@ -211,23 +396,57 @@ static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
         }
         pkt->tuple.sport = udph->source;
         pkt->tuple.dport = udph->dest;
-    } else if (pkt->is_ipv4 && pkt->nexthdr == IPPROTO_ICMP) {
-        struct icmphdr *icmph = trans_data;
-        if ((void *)(icmph + 1) > data_end) {
+    } else if (is_icmpx(pkt->nexthdr)) {
+        int ret =
+            icmpx_msg_type(pkt->is_ipv4, pkt->nexthdr, trans_data, data_end);
+        switch (ret) {
+        case ICMP_ERROR_MSG: {
+            struct inet_tuple err_tuple = {};
+            int err_l3_hdr_len;
+            ret = parse_packet_light(
+                pkt->is_ipv4, trans_data + sizeof(struct icmphdr), data_end,
+                &err_tuple, &pkt->nexthdr, &err_l3_hdr_len);
+            if (ret == TC_ACT_OK) {
+                pkt->err_l3_off =
+                    pkt->l4_off +
+                    sizeof(struct icmphdr); // same for icmpv6 header
+                pkt->err_l4_off = pkt->err_l3_off + err_l3_hdr_len;
+                if (!ADDR6_EQ(pkt->tuple.saddr.all, err_tuple.daddr.all) ||
+                    !ADDR6_EQ(pkt->tuple.daddr.all, err_tuple.saddr.all)) {
+                    bpf_log_error(
+                        "IP addresses inside ICMP error message does not "
+                        "match top IP addresses");
+                    return TC_ACT_SHOT;
+                }
+                pkt->tuple.sport = err_tuple.dport;
+                pkt->tuple.dport = err_tuple.sport;
+                bpf_log_debug("ICMP error, nexthdr:%d, %d->%d", pkt->nexthdr,
+                              bpf_ntohs(pkt->tuple.sport),
+                              bpf_ntohs(pkt->tuple.dport));
+            } else {
+                return ret;
+            }
+
+            break;
+        }
+        case ICMP_QUERY_MSG: {
+            pkt->err_l3_off = -ICMP_QUERY_MSG;
+            pkt->tuple.sport = pkt->tuple.dport =
+                get_icmpx_query_id(trans_data);
+            bpf_log_debug("ICMP query, id:%d", pkt->tuple.sport);
+            break;
+        }
+        case ICMP_ACT_UNSPEC:
+            return TC_ACT_UNSPEC;
+        case ICMP_ACT_SHOT:
             return TC_ACT_SHOT;
         }
-        // TODO: parse ICMP content
-    } else if (!pkt->is_ipv4 && pkt->nexthdr == NEXTHDR_ICMP) {
-        struct icmp6hdr *icmp6h = trans_data;
-        if ((void *)(icmp6h + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
-        // TODO: parse ICMPv6 content
     } else {
         return TC_ACT_UNSPEC;
     }
 
     return TC_ACT_OK;
+#undef BPF_LOG_TOPIC
 }
 
 static int frag_timer_cb(void *_map_frag_track, struct map_frag_track_key *key,
@@ -247,6 +466,9 @@ static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
         pkt->frag_type == FRAG_LAST && pkt->frag_off == 0) {
         // this is an atomic packet
         return pkt->l4_off >= 0 ? TC_ACT_OK : TC_ACT_UNSPEC;
+    }
+    if (is_icmpx_error_pkt(pkt)) {
+        return TC_ACT_SHOT;
     }
 
     int ret;
@@ -315,21 +537,22 @@ delete_entry:
 }
 
 static __always_inline int ipv4_update_csum(struct __sk_buff *skb, u32 l3_off,
-                                            u32 l4_off, __be32 from_addr,
+                                            u32 l4_csum_off, __be32 from_addr,
                                             __be16 from_port, __be32 to_addr,
-                                            __be16 to_port) {
+                                            __be16 to_port, bool l4_pseudo) {
     int ret;
     u32 ip_check_off = l3_off + offsetof(struct iphdr, check);
-    u32 udp_check_off = l4_off + offsetof(struct udphdr, check);
 
-    ret = bpf_l4_csum_replace(skb, udp_check_off, from_port, to_port,
+    ret = bpf_l4_csum_replace(skb, l4_csum_off, from_port, to_port,
                               2 | BPF_F_MARK_MANGLED_0);
     if (ret)
         return ret;
-    ret = bpf_l4_csum_replace(skb, udp_check_off, from_addr, to_addr,
-                              4 | BPF_F_MARK_MANGLED_0 | BPF_F_PSEUDO_HDR);
-    if (ret)
-        return ret;
+    if (l4_pseudo) {
+        ret = bpf_l4_csum_replace(skb, l4_csum_off, from_addr, to_addr,
+                                  4 | BPF_F_MARK_MANGLED_0 | BPF_F_PSEUDO_HDR);
+        if (ret)
+            return ret;
+    }
     ret = bpf_l3_csum_replace(skb, ip_check_off, from_addr, to_addr, 4);
     if (ret)
         return ret;
@@ -483,8 +706,12 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
+    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) || !pkt.is_ipv4) {
+        return TC_ACT_UNSPEC;
+    }
 
-    if (pkt.nexthdr != IPPROTO_UDP || !pkt.is_ipv4) {
+    if (is_icmpx_error_pkt(&pkt)) {
+        // TODO: handle ICMP error message
         return TC_ACT_UNSPEC;
     }
 
@@ -513,9 +740,11 @@ int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_SHOT;
     }
 
+    struct port_range *proto_range;
     u16 ext_port = bpf_ntohs(pkt.tuple.dport);
-    if (find_port_range_idx(ext_port, ext_config->udp_range_len,
-                            ext_config->udp_range) < 0) {
+    u32 range_len = select_port_range(ext_config, pkt.nexthdr, &proto_range);
+    if (range_len == 0 ||
+        find_port_range_idx(ext_port, range_len, proto_range) < 0) {
         bpf_log_trace("external port %d not in mapping range, passthrough",
                       ext_port);
         return TC_ACT_UNSPEC;
@@ -592,13 +821,24 @@ int ingress_rev_snat(struct __sk_buff *skb) {
                         &ct_value->origin.saddr.ip,
                         sizeof(ct_value->origin.saddr.ip), 0);
     if (pkt.l4_off >= 0) {
-        bpf_skb_store_bytes(skb, pkt.l4_off + offsetof(struct udphdr, dest),
-                            &ct_value->origin.sport,
+        u32 l4_port_off;
+        u32 l4_csum_off;
+        bool l4_pseudo;
+        if (is_icmpx(pkt.nexthdr)) {
+            l4_port_off = pkt.l4_off + offsetof(struct icmphdr, un.echo.id);
+            l4_csum_off = pkt.l4_off + offsetof(struct icmphdr, checksum);
+            l4_pseudo = pkt.nexthdr == NEXTHDR_ICMP;
+        } else {
+            l4_port_off = pkt.l4_off + offsetof(struct udphdr, dest);
+            l4_csum_off = pkt.l4_off + offsetof(struct udphdr, check);
+            l4_pseudo = true;
+        }
+        bpf_skb_store_bytes(skb, l4_port_off, &ct_value->origin.sport,
                             sizeof(ct_value->origin.sport), 0);
-        ret =
-            ipv4_update_csum(skb, pkt.l3_off, pkt.l4_off,
-                             ct_key.external.saddr.ip, ct_key.external.sport,
-                             ct_value->origin.saddr.ip, ct_value->origin.sport);
+        ret = ipv4_update_csum(skb, pkt.l3_off, l4_csum_off,
+                               ct_key.external.saddr.ip, ct_key.external.sport,
+                               ct_value->origin.saddr.ip,
+                               ct_value->origin.sport, l4_pseudo);
     } else {
         ret = ipv4_update_csum_l3(skb, pkt.l3_off, ct_key.external.saddr.ip,
                                   ct_value->origin.saddr.ip);
@@ -669,7 +909,7 @@ static int find_port_cb(u32 index, struct find_port_ctx *ctx) {
 }
 
 static int __always_inline
-fill_unique_binding_port(const struct map_binding_key *key_orig,
+fill_unique_binding_port(u8 l4proto, const struct map_binding_key *key_orig,
                          struct map_binding_value *val_orig) {
 #define BPF_LOG_TOPIC "find_binding_port"
     struct ipv4_lpm_key ext_key = {.prefixlen = 32, .ip = val_orig->to_addr.ip};
@@ -685,8 +925,8 @@ fill_unique_binding_port(const struct map_binding_key *key_orig,
         return TC_ACT_SHOT;
     }
 
-    struct port_range *proto_range = ext_config->udp_range;
-    u32 range_len = ext_config->udp_range_len;
+    struct port_range *proto_range;
+    u32 range_len = select_port_range(ext_config, l4proto, &proto_range);
     if (range_len == 0) {
         return TC_ACT_SHOT;
     }
@@ -752,7 +992,12 @@ int egress_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.nexthdr != IPPROTO_UDP || !pkt.is_ipv4) {
+    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) || !pkt.is_ipv4) {
+        return TC_ACT_UNSPEC;
+    }
+
+    if (is_icmpx_error_pkt(&pkt)) {
+        // TODO: handle ICMP error message
         return TC_ACT_UNSPEC;
     }
 
@@ -772,6 +1017,7 @@ int egress_snat(struct __sk_buff *skb) {
     struct external_config *ext_config =
         bpf_map_lookup_elem(&map_ipv4_external_config, &ext_key);
     if (ext_config) {
+        // this packet was send from local NAT host
         if (ext_config->flags & EXTERNAL_NO_SNAT_FLAG) {
             goto check_hairpin;
         }
@@ -779,17 +1025,21 @@ int egress_snat(struct __sk_buff *skb) {
             return TC_ACT_SHOT;
         }
 
+        struct port_range *proto_range;
         u16 ext_port = bpf_ntohs(pkt.tuple.sport);
-        if (find_port_range_idx(ext_port, ext_config->udp_range_len,
-                                ext_config->udp_range) < 0) {
+        u32 range_len =
+            select_port_range(ext_config, pkt.nexthdr, &proto_range);
+        if (range_len == 0 ||
+            find_port_range_idx(ext_port, range_len, proto_range) < 0) {
             bpf_log_trace("external port %d not in mapping range, passthrough",
                           ext_port);
             goto check_hairpin;
         }
 
         if (false) {
-            // Disallow TCP/UDP SNAT for external IP, i.e. disallow binding
-            // <external IP>:<internal port> -> <external IP>:<external port>.
+            // Disallow TCP/UDP SNAT for external IP to itself, i.e. disallow
+            // binding of
+            //<external IP>:<host port> -> <external IP>:<external port>.
             //
             // ICMP ID remapping for external IP is needed as Linux allows
             // setting arbitrary ICMP ID which would cause collision with ICMP
@@ -820,7 +1070,7 @@ int egress_snat(struct __sk_buff *skb) {
         };
         b_value_new.to_addr.ip = g_ipv4_external_addr;
 
-        ret = fill_unique_binding_port(&b_key, &b_value_new);
+        ret = fill_unique_binding_port(pkt.nexthdr, &b_key, &b_value_new);
         if (ret == TC_ACT_UNSPEC) {
             goto check_hairpin;
         } else if (ret != TC_ACT_OK) {
@@ -888,13 +1138,24 @@ int egress_snat(struct __sk_buff *skb) {
                         &ct_key.external.saddr.ip,
                         sizeof(ct_key.external.saddr.ip), 0);
     if (pkt.l4_off >= 0) {
-        bpf_skb_store_bytes(skb, pkt.l4_off + offsetof(struct udphdr, source),
-                            &ct_key.external.sport,
+        u32 l4_port_off;
+        u32 l4_csum_off;
+        bool l4_pseudo;
+        if (is_icmpx(pkt.nexthdr)) {
+            l4_port_off = pkt.l4_off + offsetof(struct icmphdr, un.echo.id);
+            l4_csum_off = pkt.l4_off + offsetof(struct icmphdr, checksum);
+            l4_pseudo = pkt.nexthdr == NEXTHDR_ICMP;
+        } else {
+            l4_port_off = pkt.l4_off + offsetof(struct udphdr, source);
+            l4_csum_off = pkt.l4_off + offsetof(struct udphdr, check);
+            l4_pseudo = true;
+        }
+        bpf_skb_store_bytes(skb, l4_port_off, &ct_key.external.sport,
                             sizeof(ct_key.external.sport), 0);
-        ret =
-            ipv4_update_csum(skb, pkt.l3_off, pkt.l4_off,
-                             ct_value->origin.saddr.ip, ct_value->origin.sport,
-                             ct_key.external.saddr.ip, ct_key.external.sport);
+        ret = ipv4_update_csum(skb, pkt.l3_off, l4_csum_off,
+                               ct_value->origin.saddr.ip,
+                               ct_value->origin.sport, ct_key.external.saddr.ip,
+                               ct_key.external.sport, l4_pseudo);
     } else {
         ret = ipv4_update_csum_l3(skb, pkt.l3_off, ct_value->origin.saddr.ip,
                                   ct_key.external.saddr.ip);

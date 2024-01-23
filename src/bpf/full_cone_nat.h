@@ -29,14 +29,33 @@
 #define NEXTHDR_AUTH 51     /* Authentication header. */
 #define NEXTHDR_DEST 60     /* Destination options header. */
 
-#define NEXTHDR_TCP 6        /* TCP segment. */
-#define NEXTHDR_UDP 17       /* UDP message. */
-#define NEXTHDR_ICMP 58     /* ICMP for IPv6. */
-#define NEXTHDR_NONE 59     /* No next header */
-#define NEXTHDR_SCTP 132     /* SCTP message. */
+#define NEXTHDR_TCP 6    /* TCP segment. */
+#define NEXTHDR_UDP 17   /* UDP message. */
+#define NEXTHDR_ICMP 58  /* ICMP for IPv6. */
+#define NEXTHDR_NONE 59  /* No next header */
+#define NEXTHDR_SCTP 132 /* SCTP message. */
 
 #define IPV6_FRAG_OFFSET 0xFFF8
 #define IPV6_FRAG_MF 0x0001
+
+// #include <linux/icmp.h>
+#define ICMP_DEST_UNREACH 3   /* Destination Unreachable	*/
+#define ICMP_TIME_EXCEEDED 11 /* Time Exceeded		*/
+#define ICMP_PARAMETERPROB 12 /* Parameter Problem		*/
+
+#define ICMP_ECHOREPLY 0       /* Echo Reply			*/
+#define ICMP_ECHO 8            /* Echo Request			*/
+#define ICMP_TIMESTAMP 13      /* Timestamp Request		*/
+#define ICMP_TIMESTAMPREPLY 14 /* Timestamp Reply		*/
+
+// #include <linux/icmpv6.h>
+#define ICMPV6_DEST_UNREACH 1
+#define ICMPV6_PKT_TOOBIG 2
+#define ICMPV6_TIME_EXCEED 3
+#define ICMPV6_PARAMPROB 4
+
+#define ICMPV6_ECHO_REQUEST 128
+#define ICMPV6_ECHO_REPLY 129
 
 #define AF_INET 2
 #define AF_INET6 10
@@ -104,6 +123,9 @@ struct dest_config {
 #define FRAG_TRACK_EGRESS_FLAG (1 << 0)
 #define ADDR_IPV4_FLAG (1 << 1)
 #define ADDR_IPV6_FLAG (1 << 2) // not supported yet
+
+// NOTE: all map key structs have to explicitly padded and the padding fields
+// need to be zeroed
 
 struct map_frag_track_key {
     u32 ifindex;
@@ -201,6 +223,24 @@ get_rev_dir_binding_key(struct map_binding_key *key_rev,
     COPY_ADDR6(key_rev->from_addr.all, val->to_addr.all);
 }
 
+static __always_inline u32 select_port_range(struct external_config *ext_config,
+                                             u8 l4proto,
+                                             struct port_range **proto_range) {
+    switch (l4proto) {
+    case IPPROTO_TCP:
+        *proto_range = ext_config->tcp_range;
+        return ext_config->tcp_range_len;
+    case IPPROTO_UDP:
+        *proto_range = ext_config->udp_range;
+        return ext_config->udp_range_len;
+    case IPPROTO_ICMP:
+    case NEXTHDR_ICMP:
+        *proto_range = ext_config->icmp_range;
+        return ext_config->icmp_range_len;
+    }
+    return 0;
+}
+
 static __always_inline int
 find_port_range_idx(u16 port, u32 range_len,
                     const struct port_range range_list[MAX_PORT_RANGES]) {
@@ -211,9 +251,6 @@ find_port_range_idx(u16 port, u32 range_len,
         }
         const struct port_range *range = &range_list[i];
 
-        if (range->end_port == 0) {
-            break;
-        }
         if (port >= range->begin_port && port <= range->end_port) {
             return i;
         }
