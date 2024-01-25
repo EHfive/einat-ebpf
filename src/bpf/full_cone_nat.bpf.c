@@ -1050,6 +1050,12 @@ int egress_snat(struct __sk_buff *skb) {
         }
     }
 
+    // source port 0 is reversed, don't SNAT for it
+    if ((pkt.nexthdr == IPPROTO_TCP || pkt.nexthdr == IPPROTO_UDP) &&
+        pkt.tuple.sport == 0) {
+        return TC_ACT_SHOT;
+    }
+
     struct map_binding_key b_key_rev;
     struct map_binding_key b_key = {
         .ifindex = skb->ifindex,
