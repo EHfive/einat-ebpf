@@ -3,7 +3,7 @@
 
 # eBPF Full Cone NAT
 
-This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" UDP NAT(network address translation).
+This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation).
 
 ## Requirement
 
@@ -27,17 +27,19 @@ nix build github:EHfive/bpf-full-cone-nat
 
 ## Usage
 
+The interface address monitoring is not implemented yet, currently you need to specify IP address of the interface statically with `--external-ip` flag.
+
 ```shell
 sudo bpf-full-cone-nat --ifname eth0 --external-ip x.x.x.x
 ```
 
-Currently only basic UDP SNAT is implemented, you would need to setup masquerading for TCP using iptables/nftables as well. And the port mapping range is also hard coded to `20000-23999` and `25000-29999` for testing purpose.
+Currently only IPv4 UDP/ICMP SNAT are implemented, you would need to setup masquerading for TCP using iptables/nftables as well. And the UDP port mapping range is also hard coded to `20000-23999` and `25000-29999` for testing purpose.
 
 ```nft
-table inet nat {
+table ip nat {
   chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
-    meta l4proto != udp oifname eth0 masquerade
+    meta l4proto tcp oifname eth0 masquerade
   }
 }
 ```
