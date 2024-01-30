@@ -98,7 +98,7 @@ struct port_range {
     u16 end_port;
 };
 
-#define MAX_PORT_RANGES 16
+#define MAX_PORT_RANGES 4
 
 struct external_config {
     struct port_range tcp_range[MAX_PORT_RANGES];
@@ -223,9 +223,9 @@ get_rev_dir_binding_key(struct map_binding_key *key_rev,
     COPY_ADDR6(key_rev->from_addr.all, val->to_addr.all);
 }
 
-static __always_inline u32 select_port_range(struct external_config *ext_config,
-                                             u8 l4proto,
-                                             struct port_range **proto_range) {
+static __always_inline u8 select_port_range(struct external_config *ext_config,
+                                            u8 l4proto,
+                                            struct port_range **proto_range) {
     switch (l4proto) {
     case IPPROTO_TCP:
         *proto_range = ext_config->tcp_range;
@@ -242,7 +242,7 @@ static __always_inline u32 select_port_range(struct external_config *ext_config,
 }
 
 static __always_inline int
-find_port_range_idx(u16 port, u32 range_len,
+find_port_range_idx(u16 port, u8 range_len,
                     const struct port_range range_list[MAX_PORT_RANGES]) {
 #pragma unroll
     for (int i = 0; i < MAX_PORT_RANGES; i++) {
@@ -256,4 +256,24 @@ find_port_range_idx(u16 port, u32 range_len,
         }
     }
     return -1;
+}
+
+static __always_inline int get_l3_to_addr_off(bool is_ipv4, bool is_source) {
+    return is_source ? (is_ipv4 ? offsetof(struct iphdr, saddr)
+                                : offsetof(struct ipv6hdr, saddr))
+                     : (is_ipv4 ? offsetof(struct iphdr, daddr)
+                                : offsetof(struct ipv6hdr, daddr));
+}
+
+static __always_inline int bpf_write_inet_addr(struct __sk_buff *skb,
+                                               bool is_ipv4, int addr_off,
+                                               union u_inet_addr *to_addr) {
+    return bpf_skb_store_bytes(
+        skb, addr_off, is_ipv4 ? &to_addr->ip : to_addr->ip6,
+        is_ipv4 ? sizeof(to_addr->ip) : sizeof(to_addr->ip6), 0);
+}
+
+static __always_inline int bpf_write_port(struct __sk_buff *skb, int port_off,
+                                          __be16 to_port) {
+    return bpf_skb_store_bytes(skb, port_off, &to_port, sizeof(to_port), 0);
 }

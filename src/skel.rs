@@ -36,7 +36,7 @@ pub struct PortRange {
     pub to_port: u16,
 }
 
-const MAX_PORT_RANGES: usize = 16;
+const MAX_PORT_RANGES: usize = 4;
 
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 #[repr(C)]
