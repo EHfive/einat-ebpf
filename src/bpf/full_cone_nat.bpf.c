@@ -73,7 +73,6 @@ struct packet_info {
     u16 frag_off;
     u32 frag_id;
     struct inet_tuple tuple;
-    int l3_off;
     int l4_off;
     // ICMP error message
     int err_l4_off;
@@ -92,9 +91,9 @@ static __always_inline bool is_icmpx_error_pkt(const struct packet_info *pkt) {
 }
 
 static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
-                                                   const void *data_end,
                                                    struct inet_tuple *tuple,
                                                    u8 *nexthdr) {
+#define BPF_LOG_TOPIC "parse_ipv4_packet_light"
     if (iph->version != 4) {
         return -1;
     }
@@ -105,11 +104,12 @@ static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
         return -1;
     }
     return (iph->ihl * 4);
+#undef BPF_LOG_TOPIC
 }
 
 static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
-                                             const struct iphdr *iph,
-                                             const void *data_end) {
+                                             const struct iphdr *iph) {
+#define BPF_LOG_TOPIC "parse_ipv4_packet"
     if (iph->version != 4) {
         return -1;
     }
@@ -127,40 +127,46 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     pkt->frag_id = bpf_ntohs(iph->id);
     pkt->nexthdr = iph->protocol;
     return (iph->ihl * 4);
+#undef BPF_LOG_TOPIC
 }
-
-static __always_inline int parse_ipv6_packet_light(const struct ipv6hdr *ip6h,
-                                                   const void *data_end,
-                                                   struct inet_tuple *tuple,
-                                                   u8 *nexthdr) {
+static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
+                                              struct inet_tuple *tuple,
+                                              u8 *nexthdr,
+                                              struct frag_hdr *frag_hdr) {
+#define BPF_LOG_TOPIC "_parse_ipv6_packet"
+    struct ipv6hdr *ip6h;
+    if (VALIDATE_PULL_L3(skb, &ip6h, l3_off, sizeof(*ip6h))) {
+        return -1;
+    }
     if (ip6h->version != 6) {
         return -1;
     }
     COPY_ADDR6(tuple->saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
     COPY_ADDR6(tuple->daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
 
-    struct frag_hdr *frag_hdr = NULL;
+    u32 frag_hdr_off = 0;
     int len = sizeof(struct ipv6hdr);
+    *nexthdr = ip6h->nexthdr;
 #pragma unroll
     for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
         switch (*nexthdr) {
         case NEXTHDR_FRAGMENT:
-            frag_hdr = (struct frag_hdr *)((void *)ip6h + len);
+            frag_hdr_off = len;
         case NEXTHDR_HOP:
         case NEXTHDR_ROUTING:
         case NEXTHDR_AUTH:
         case NEXTHDR_DEST: {
-            struct ipv6_opt_hdr *opthdr =
-                (struct ipv6_opt_hdr *)((void *)ip6h + len);
-            if ((void *)(opthdr + 1) > data_end) {
+            struct ipv6_opt_hdr opthdr;
+            if (bpf_skb_load_bytes(skb, l3_off + len, &opthdr,
+                                   sizeof(opthdr))) {
                 return -1;
             }
             if (*nexthdr == NEXTHDR_AUTH) {
-                len += (opthdr->hdrlen + 2) * 4;
+                len += (opthdr.hdrlen + 2) * 4;
             } else {
-                len += (opthdr->hdrlen + 1) * 8;
+                len += (opthdr.hdrlen + 1) * 8;
             }
-            *nexthdr = opthdr->nexthdr;
+            *nexthdr = opthdr.nexthdr;
             break;
         }
         default:
@@ -170,81 +176,64 @@ static __always_inline int parse_ipv6_packet_light(const struct ipv6hdr *ip6h,
     return -1;
 
 found_upper_layer:
-    if (frag_hdr) {
-        if ((void *)(frag_hdr + 1) > data_end) {
+    if (frag_hdr_off) {
+        if (bpf_skb_load_bytes(skb, l3_off + frag_hdr_off, frag_hdr,
+                               sizeof(*frag_hdr))) {
             return -1;
         }
-        if (frag_hdr->frag_off & bpf_htons(IPV6_FRAG_OFFSET)) {
-            return -1;
-        }
+    } else {
+        frag_hdr->frag_off = 0;
     }
     return len;
+#undef BPF_LOG_TOPIC
 }
 
-static __always_inline int parse_ipv6_packet(struct packet_info *pkt,
-                                             const struct ipv6hdr *ip6h,
-                                             const void *data_end) {
-    if (ip6h->version != 6) {
+static __always_inline int parse_ipv6_packet_light(struct __sk_buff *skb,
+                                                   u32 l3_off,
+                                                   struct inet_tuple *tuple,
+                                                   u8 *nexthdr) {
+#define BPF_LOG_TOPIC "parse_ipv6_packet_light"
+
+    struct frag_hdr frag_hdr;
+    int len = _parse_ipv6_packet(skb, l3_off, tuple, nexthdr, &frag_hdr);
+    if (len < 0) {
+        return len;
+    }
+
+    if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET)) {
         return -1;
     }
-    COPY_ADDR6(pkt->tuple.saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
-    COPY_ADDR6(pkt->tuple.daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
+    return len;
+#undef BPF_LOG_TOPIC
+}
+
+static __always_inline int
+parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
+#define BPF_LOG_TOPIC "parse_ipv6_packet"
     pkt->is_ipv4 = false;
 
-    struct frag_hdr *frag_hdr = NULL;
-    int len = sizeof(struct ipv6hdr);
-    u8 nexthdr = ip6h->nexthdr;
-
-#pragma unroll
-    for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
-        switch (nexthdr) {
-        case NEXTHDR_FRAGMENT:
-            frag_hdr = (struct frag_hdr *)((void *)ip6h + len);
-        case NEXTHDR_HOP:
-        case NEXTHDR_ROUTING:
-        case NEXTHDR_AUTH:
-        case NEXTHDR_DEST: {
-            struct ipv6_opt_hdr *opthdr =
-                (struct ipv6_opt_hdr *)((void *)ip6h + len);
-            if ((void *)(opthdr + 1) > data_end) {
-                return -1;
-            }
-            if (nexthdr == NEXTHDR_AUTH) {
-                len += (opthdr->hdrlen + 2) * 4;
-            } else {
-                len += (opthdr->hdrlen + 1) * 8;
-            }
-            nexthdr = opthdr->nexthdr;
-            break;
-        }
-        default:
-            goto found_upper_layer;
-        }
+    struct frag_hdr frag_hdr;
+    int len =
+        _parse_ipv6_packet(skb, l3_off, &pkt->tuple, &pkt->nexthdr, &frag_hdr);
+    if (len < 0 || !frag_hdr.frag_off) {
+        return len;
     }
-    return -1;
 
-found_upper_layer:
-    if (frag_hdr) {
-        if ((void *)(frag_hdr + 1) > data_end) {
-            return -1;
-        }
-        pkt->frag_id = bpf_ntohl(frag_hdr->identification);
-        pkt->frag_off =
-            bpf_ntohs(frag_hdr->frag_off & bpf_htons(IPV6_FRAG_OFFSET));
+    pkt->frag_id = bpf_ntohl(frag_hdr.identification);
+    pkt->frag_off = bpf_ntohs(frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET));
 
-        if (frag_hdr->frag_off & bpf_htons(IPV6_FRAG_MF)) {
-            pkt->frag_type = FRAG_MORE;
-        } else if (pkt->frag_off) {
-            pkt->frag_type = FRAG_LAST;
-        } else {
-            // This packet is the last fragment but also the first
-            // fragment as fragmentation offset is 0, so just ignore
-            // the fragmentation.
-            pkt->frag_type = FRAG_NONE;
-        }
+    if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_MF)) {
+        pkt->frag_type = FRAG_MORE;
+    } else if (pkt->frag_off) {
+        pkt->frag_type = FRAG_LAST;
+    } else {
+        // This packet is the last fragment but also the first
+        // fragment as fragmentation offset is 0, so just ignore
+        // the fragmentation.
+        pkt->frag_type = FRAG_NONE;
     }
-    pkt->nexthdr = nexthdr;
     return len;
+#undef BPF_LOG_TOPIC
 }
 
 enum {
@@ -254,15 +243,12 @@ enum {
     ICMP_ACT_SHOT,
 };
 static __always_inline int icmpx_msg_type(bool is_ipv4, u8 nexthdr,
-                                          void *trans_data, void *data_end) {
+                                          void *trans_data) {
     if (nexthdr == IPPROTO_ICMP) {
         if (!is_ipv4) {
             return ICMP_ACT_SHOT;
         }
         struct icmphdr *icmph = trans_data;
-        if ((void *)(icmph + 1) > data_end) {
-            return ICMP_ACT_SHOT;
-        }
         switch (icmph->type) {
         case ICMP_DEST_UNREACH:
         case ICMP_TIME_EXCEEDED:
@@ -279,9 +265,6 @@ static __always_inline int icmpx_msg_type(bool is_ipv4, u8 nexthdr,
             return TC_ACT_SHOT;
         }
         struct icmp6hdr *icmp6h = trans_data;
-        if ((void *)(icmp6h + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
         switch (icmp6h->icmp6_type) {
         case ICMPV6_DEST_UNREACH:
         case ICMPV6_PKT_TOOBIG:
@@ -300,47 +283,48 @@ static __always_inline __be16 get_icmpx_query_id(struct icmphdr *icmph) {
     return icmph->un.echo.id;
 }
 
-static __always_inline int parse_packet_light(bool is_ipv4, void *err_l3_data,
-                                              void *data_end,
+static __always_inline int parse_packet_light(struct __sk_buff *skb,
+                                              bool is_ipv4, int l3_off,
                                               struct inet_tuple *tuple,
                                               u8 *nexthdr, int *l3_hdr_len) {
+#define BPF_LOG_TOPIC "parse_packet_light"
     if (is_ipv4) {
-        struct iphdr *iph = err_l3_data;
-        if ((void *)(iph + 1) > data_end) {
+        struct iphdr *iph;
+        if (VALIDATE_PULL_L3(skb, &iph, l3_off, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
-        *l3_hdr_len = parse_ipv4_packet_light(iph, data_end, tuple, nexthdr);
+        *l3_hdr_len = parse_ipv4_packet_light(iph, tuple, nexthdr);
     } else {
-        struct ipv6hdr *ip6h = err_l3_data;
-        if ((void *)(ip6h + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
-        *l3_hdr_len = parse_ipv6_packet_light(ip6h, data_end, tuple, nexthdr);
+        *l3_hdr_len = parse_ipv6_packet_light(skb, l3_off, tuple, nexthdr);
     }
     if (*l3_hdr_len < 0) {
         return TC_ACT_SHOT;
     }
 
-    void *trans_data = err_l3_data + *l3_hdr_len;
+    int l4_off = l3_off + *l3_hdr_len;
     if (*nexthdr == IPPROTO_TCP) {
-        struct tcphdr *tcph = trans_data;
-        if ((void *)(tcph + 1) > data_end) {
+        struct tcphdr *tcph;
+        if (VALIDATE_PULL(skb, &tcph, l4_off, sizeof(*tcph))) {
             return TC_ACT_SHOT;
         }
         tuple->sport = tcph->source;
         tuple->dport = tcph->dest;
     } else if (*nexthdr == IPPROTO_UDP) {
-        struct udphdr *udph = trans_data;
-        if ((void *)(udph + 1) > data_end) {
+        struct udphdr *udph;
+        if (VALIDATE_PULL(skb, &udph, l4_off, sizeof(*udph))) {
             return TC_ACT_SHOT;
         }
         tuple->sport = udph->source;
         tuple->dport = udph->dest;
     } else if (is_icmpx(*nexthdr)) {
-        int ret = icmpx_msg_type(is_ipv4, *nexthdr, trans_data, data_end);
+        void *icmph;
+        if (VALIDATE_PULL(skb, &icmph, l4_off, sizeof(struct icmphdr))) {
+            return TC_ACT_SHOT;
+        }
+        int ret = icmpx_msg_type(is_ipv4, *nexthdr, icmph);
         switch (ret) {
         case ICMP_QUERY_MSG: {
-            tuple->sport = tuple->dport = get_icmpx_query_id(trans_data);
+            tuple->sport = tuple->dport = get_icmpx_query_id(icmph);
             break;
         }
         case ICMP_ERROR_MSG:
@@ -348,7 +332,8 @@ static __always_inline int parse_packet_light(bool is_ipv4, void *err_l3_data,
         case ICMP_ACT_UNSPEC:
             // ICMP message not parsed
             return TC_ACT_UNSPEC;
-        case ICMP_ACT_SHOT:
+        default:
+            bpf_log_error("icmp shot");
             return TC_ACT_SHOT;
         }
     } else {
@@ -356,31 +341,27 @@ static __always_inline int parse_packet_light(bool is_ipv4, void *err_l3_data,
     }
 
     return TC_ACT_OK;
+#undef BPF_LOG_TOPIC
 }
 
 // not inline to reduce eBPF verification branches
-static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
+static int parse_packet(struct __sk_buff *skb, struct packet_info *pkt) {
 #define BPF_LOG_TOPIC "parse_packet"
-    void *data_end = (void *)(long)skb->data_end;
-    struct ethhdr *eth = (struct ethhdr *)(void *)(long)skb->data;
+    void *data_end = ctx_data_end(skb);
+    struct ethhdr *eth = ctx_data(skb);
     if ((void *)(eth + 1) > data_end) {
         return TC_ACT_SHOT;
     }
-    pkt->l3_off = sizeof(*eth);
 
     int l3_header_len;
     if (eth->h_proto == bpf_htons(ETH_P_IP)) {
-        struct iphdr *iph = (struct iphdr *)((void *)eth + sizeof(*eth));
-        if ((void *)(iph + 1) > data_end) {
+        struct iphdr *iph;
+        if (VALIDATE_PULL_L3(skb, &iph, TC_SKB_L3_OFF, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
-        l3_header_len = parse_ipv4_packet(pkt, iph, data_end);
+        l3_header_len = parse_ipv4_packet(pkt, iph);
     } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
-        struct ipv6hdr *ip6h = (struct ipv6hdr *)((void *)eth + sizeof(*eth));
-        if ((void *)(ip6h + 1) > data_end) {
-            return TC_ACT_SHOT;
-        }
-        l3_header_len = parse_ipv6_packet(pkt, ip6h, data_end);
+        l3_header_len = parse_ipv6_packet(skb, pkt, TC_SKB_L3_OFF);
     } else {
         return TC_ACT_UNSPEC;
     }
@@ -394,34 +375,36 @@ static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
         pkt->l4_off = -1;
         return TC_ACT_OK;
     }
-    pkt->l4_off = pkt->l3_off + l3_header_len;
+    pkt->l4_off = TC_SKB_L3_OFF + l3_header_len;
     pkt->err_l4_off = -1;
 
-    void *trans_data = (void *)eth + pkt->l4_off;
     if (pkt->nexthdr == IPPROTO_TCP) {
-        struct tcphdr *tcph = trans_data;
-        if ((void *)(tcph + 1) > data_end) {
+        struct tcphdr *tcph;
+        if (VALIDATE_PULL(skb, &tcph, pkt->l4_off, sizeof(*tcph))) {
             return TC_ACT_SHOT;
         }
         pkt->tuple.sport = tcph->source;
         pkt->tuple.dport = tcph->dest;
     } else if (pkt->nexthdr == IPPROTO_UDP) {
-        struct udphdr *udph = trans_data;
-        if ((void *)(udph + 1) > data_end) {
+        struct udphdr *udph;
+        if (VALIDATE_PULL(skb, &udph, pkt->l4_off, sizeof(*udph))) {
             return TC_ACT_SHOT;
         }
         pkt->tuple.sport = udph->source;
         pkt->tuple.dport = udph->dest;
     } else if (is_icmpx(pkt->nexthdr)) {
-        int ret =
-            icmpx_msg_type(pkt->is_ipv4, pkt->nexthdr, trans_data, data_end);
+        struct icmphdr *icmph;
+        if (VALIDATE_PULL(skb, &icmph, pkt->l4_off, sizeof(struct icmphdr))) {
+            return TC_ACT_SHOT;
+        }
+        int ret = icmpx_msg_type(pkt->is_ipv4, pkt->nexthdr, icmph);
         switch (ret) {
         case ICMP_ERROR_MSG: {
             struct inet_tuple err_tuple = {};
             int err_l3_hdr_len;
             ret = parse_packet_light(
-                pkt->is_ipv4, trans_data + sizeof(struct icmphdr), data_end,
-                &err_tuple, &pkt->nexthdr, &err_l3_hdr_len);
+                skb, pkt->is_ipv4, icmpx_err_l3_offset(pkt->l4_off), &err_tuple,
+                &pkt->nexthdr, &err_l3_hdr_len);
             if (ret != TC_ACT_OK) {
                 return ret;
             }
@@ -448,14 +431,14 @@ static int parse_packet(const struct __sk_buff *skb, struct packet_info *pkt) {
             break;
         }
         case ICMP_QUERY_MSG: {
-            pkt->tuple.sport = pkt->tuple.dport =
-                get_icmpx_query_id(trans_data);
+            pkt->tuple.sport = pkt->tuple.dport = get_icmpx_query_id(icmph);
             bpf_log_debug("ICMP query, id:%d", bpf_ntohs(pkt->tuple.sport));
             break;
         }
         case ICMP_ACT_UNSPEC:
             return TC_ACT_UNSPEC;
-        case ICMP_ACT_SHOT:
+        default:
+            bpf_log_error("icmp shot");
             return TC_ACT_SHOT;
         }
     } else {
@@ -600,7 +583,7 @@ static __always_inline void ipv4_update_csum_icmp_err(
     bpf_l4_csum_replace(skb, icmp_csum_off, prev_csum, curr_csum, 2);
 
     // update of inner message
-#if 0
+#if 1
     // the update of embedded layer 4 checksum is not required but may helpful
     // for packet tracking
     bpf_skb_load_bytes(skb, err_l4_csum_off, &prev_csum, sizeof(prev_csum));
@@ -955,7 +938,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 
     // modify dest
     ret = modify_headers(skb, pkt.is_ipv4, is_icmpx_error, pkt.nexthdr,
-                         pkt.l3_off, pkt.l4_off, pkt.err_l4_off, false,
+                         TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, false,
                          &ct_key.external.saddr, ct_key.external.sport,
                          &ct_value->origin.saddr, ct_value->origin.sport);
     if (ret) {
@@ -1201,63 +1184,66 @@ int egress_snat(struct __sk_buff *skb) {
         }
     }
 
-    struct map_ct_key ct_key = {
-        .ifindex = b_key.ifindex,
-        .flags = ADDR_IPV4_FLAG,
-        .l4proto = b_key.l4proto,
-        .external = pkt.tuple,
-    };
+    struct map_ct_value *ct_value;
+    {
+        struct map_ct_key ct_key = {
+            .ifindex = b_key.ifindex,
+            .flags = ADDR_IPV4_FLAG,
+            .l4proto = b_key.l4proto,
+            .external = pkt.tuple,
+        };
 
-    COPY_ADDR6(ct_key.external.saddr.all, b_value->to_addr.all);
-    ct_key.external.sport = b_value->to_port;
+        COPY_ADDR6(ct_key.external.saddr.all, b_value->to_addr.all);
+        ct_key.external.sport = b_value->to_port;
 
-    struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
-    if (!ct_value) {
-        if (is_icmpx_error) {
-            return TC_ACT_SHOT;
-        }
-        if (!b_value_rev) {
+        ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
+        if (!ct_value) {
+            if (is_icmpx_error) {
+                return TC_ACT_SHOT;
+            }
+            if (!b_value_rev) {
+                get_rev_dir_binding_key(&b_key_rev, &b_key, b_value);
+
+                b_value_rev = bpf_map_lookup_elem(&map_binding, &b_key_rev);
+                if (!b_value_rev) {
+                    // racing, no reverse binding
+                    return TC_ACT_SHOT;
+                }
+            }
+
+            struct map_ct_value ct_value_new = {
+                .flags = ADDR_IPV4_FLAG,
+                .origin = pkt.tuple,
+                .state = CT_ESTABLISHED,
+            };
+            ct_value = insert_new_ct(&ct_key, &ct_value_new);
+            if (!ct_value) {
+                return TC_ACT_SHOT;
+            }
+            __sync_fetch_and_add(&b_value_rev->ref, 1);
+            __sync_fetch_and_add(&b_value_rev->use, 1);
+
+            bpf_log_debug("insert new CT");
+        } else if (!is_icmpx_error && ct_value->state == CT_IN_ONLY) {
             get_rev_dir_binding_key(&b_key_rev, &b_key, b_value);
-
             b_value_rev = bpf_map_lookup_elem(&map_binding, &b_key_rev);
             if (!b_value_rev) {
                 // racing, no reverse binding
                 return TC_ACT_SHOT;
             }
+
+            // XXX: use lock?
+            ct_value->state = CT_ESTABLISHED;
+            __sync_fetch_and_add(&b_value_rev->use, 1);
+
+            bpf_log_debug("found existing inbound initialized CT");
         }
-
-        struct map_ct_value ct_value_new = {
-            .flags = ADDR_IPV4_FLAG,
-            .origin = pkt.tuple,
-            .state = CT_ESTABLISHED,
-        };
-        ct_value = insert_new_ct(&ct_key, &ct_value_new);
-        if (!ct_value) {
-            return TC_ACT_SHOT;
-        }
-        __sync_fetch_and_add(&b_value_rev->ref, 1);
-        __sync_fetch_and_add(&b_value_rev->use, 1);
-
-        bpf_log_debug("insert new CT");
-    } else if (!is_icmpx_error && ct_value->state == CT_IN_ONLY) {
-        get_rev_dir_binding_key(&b_key_rev, &b_key, b_value);
-        b_value_rev = bpf_map_lookup_elem(&map_binding, &b_key_rev);
-        if (!b_value_rev) {
-            // racing, no reverse binding
-            return TC_ACT_SHOT;
-        }
-
-        // XXX: use lock?
-        ct_value->state = CT_ESTABLISHED;
-        __sync_fetch_and_add(&b_value_rev->use, 1);
-
-        bpf_log_debug("found existing inbound initialized CT");
     }
 
     ret = modify_headers(skb, pkt.is_ipv4, is_icmpx_error, pkt.nexthdr,
-                         pkt.l3_off, pkt.l4_off, pkt.err_l4_off, true,
-                         &ct_value->origin.saddr, ct_value->origin.sport,
-                         &ct_key.external.saddr, ct_key.external.sport);
+                         TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, true,
+                         &pkt.tuple.saddr, pkt.tuple.sport, &b_value->to_addr,
+                         b_value->to_port);
     if (ret) {
         bpf_log_error("failed to update csum, err:%d", ret);
         return TC_ACT_SHOT;
@@ -1266,7 +1252,7 @@ int egress_snat(struct __sk_buff *skb) {
     bpf_timer_start(&ct_value->timer, 300E9, 0);
 
 check_hairpin:
-    if (dest_config->flags & DEST_HAIRPIN_FLAG) {
+    if (dest_config && dest_config->flags & DEST_HAIRPIN_FLAG) {
         // TODO: redirect to ingress
     }
     return TC_ACT_UNSPEC;

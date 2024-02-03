@@ -161,15 +161,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut ingress = TcHookBuilder::new(progs.ingress_rev_snat().as_fd())
         .ifindex(if_index as _)
         .replace(true)
-        .handle(1)
-        .priority(1)
         .hook(TC_INGRESS);
 
     let mut egress = TcHookBuilder::new(progs.egress_snat().as_fd())
         .ifindex(if_index as _)
         .replace(true)
-        .handle(1)
-        .priority(1)
         .hook(TC_EGRESS);
 
     ingress.create().unwrap();

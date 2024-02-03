@@ -70,6 +70,8 @@
 #define BPF_LOOP_RET_CONTINUE 0
 #define BPF_LOOP_RET_BREAK 1
 
+#define TC_SKB_L3_OFF (sizeof(struct ethhdr))
+
 union u_inet_addr {
     __u32 all[4];
     __be32 ip;
@@ -277,3 +279,68 @@ static __always_inline int bpf_write_port(struct __sk_buff *skb, int port_off,
                                           __be16 to_port) {
     return bpf_skb_store_bytes(skb, port_off, &to_port, sizeof(to_port), 0);
 }
+
+// Avoid modify context register while accessing data, data_end fields,
+// copied from cilium, see
+// https://github.com/cilium/cilium/commit/847014aa62f94e5a53178670cad1eacea455b227
+
+#define DEFINE_FUNC_CTX_POINTER(FIELD)                                         \
+    static __always_inline void *ctx_##FIELD(const struct __sk_buff *ctx) {    \
+        void *ptr;                                                             \
+                                                                               \
+        /* LLVM may generate u32 assignments of                                \
+         * ctx->{data,data_end,data_meta}. With this inline asm, LLVM loses    \
+         * track of the fact this field is on 32 bits.                         \
+         */                                                                    \
+        asm volatile("%0 = *(u32 *)(%1 + %2)"                                  \
+                     : "=r"(ptr)                                               \
+                     : "r"(ctx), "i"(offsetof(struct __sk_buff, FIELD)));      \
+        return ptr;                                                            \
+    }
+/* This defines ctx_data(). */
+DEFINE_FUNC_CTX_POINTER(data)
+/* This defines ctx_data_end(). */
+DEFINE_FUNC_CTX_POINTER(data_end)
+/* This defines ctx_data_meta(). */
+DEFINE_FUNC_CTX_POINTER(data_meta)
+#undef DEFINE_FUNC_CTX_POINTER
+
+static __always_inline u32 round_up_32(u32 v, u32 max) {
+    v = (v + 31) & ~31;
+    return v > max ? max : v;
+}
+
+// `len` needs to be a constant number
+static __always_inline int _validate_pull(struct __sk_buff *skb, void **hdr_,
+                                          u32 off, u32 len, u32 extra_len) {
+    void *data = ctx_data(skb);
+    void *data_end = ctx_data_end(skb);
+    void *hdr = data + off;
+
+    if (hdr + len > data_end) {
+        if (bpf_skb_pull_data(skb,
+                              round_up_32(off + len + extra_len, skb->len))) {
+            return 1;
+        }
+        data = ctx_data(skb);
+        data_end = ctx_data_end(skb);
+        hdr = data + off;
+        if (hdr + len > data_end) {
+            return 1;
+        }
+    }
+
+    *hdr_ = hdr;
+
+    return 0;
+}
+
+#define PULL_EXTRA_L4_LEN                                                      \
+    20 // also pull at least length of TCP header while pulling L3 header to
+       // avoid additional pull
+
+#define VALIDATE_PULL(skb, hdr, off, len)                                      \
+    (_validate_pull(skb, (void **)hdr, off, len, 0))
+
+#define VALIDATE_PULL_L3(skb, hdr, off, len)                                   \
+    (_validate_pull(skb, (void **)hdr, off, len, PULL_EXTRA_L4_LEN))
