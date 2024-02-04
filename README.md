@@ -3,7 +3,7 @@
 
 # eBPF Full Cone NAT
 
-This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation).
+This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation) on TC egress and ingress hooks.
 
 ## Requirement
 

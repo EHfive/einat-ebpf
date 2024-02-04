@@ -133,7 +133,7 @@ struct map_frag_track_key {
     u32 ifindex;
     u8 flags;
     u8 l4proto;
-    u8 _pad[2];
+    u16 _pad;
     u32 id;
     union u_inet_addr saddr;
     union u_inet_addr daddr;
@@ -174,7 +174,7 @@ struct map_ct_key {
     u32 ifindex;
     u8 flags;
     u8 l4proto;
-    u8 _pad[2];
+    u16 _pad;
     struct inet_tuple external;
 };
 
@@ -213,16 +213,24 @@ static __always_inline void inet_tuple_rev_copy(struct inet_tuple *t1,
 }
 
 static __always_inline void
-get_rev_dir_binding_key(struct map_binding_key *key_rev,
-                        const struct map_binding_key *key,
-                        const struct map_binding_value *val) {
-    key_rev->ifindex = key->ifindex;
-    key_rev->flags =
-        (val->flags & (~BINDING_ORIG_DIR_FLAG)) |
-        ((key->flags & BINDING_ORIG_DIR_FLAG) ^ BINDING_ORIG_DIR_FLAG);
-    key_rev->l4proto = key->l4proto;
+binding_value_to_key(u32 ifindex, u8 flags, u8 l4proto,
+                     const struct map_binding_value *val,
+                     struct map_binding_key *key_rev) {
+    key_rev->ifindex = ifindex;
+    key_rev->flags = (val->flags & (~BINDING_ORIG_DIR_FLAG)) | flags;
+    key_rev->l4proto = l4proto;
     key_rev->from_port = val->to_port;
     COPY_ADDR6(key_rev->from_addr.all, val->to_addr.all);
+}
+
+static __always_inline void
+get_rev_dir_binding_key(const struct map_binding_key *key,
+                        const struct map_binding_value *val,
+                        struct map_binding_key *key_rev) {
+    binding_value_to_key(
+        key->ifindex,
+        ((key->flags & BINDING_ORIG_DIR_FLAG) ^ BINDING_ORIG_DIR_FLAG),
+        key->l4proto, val, key_rev);
 }
 
 static __always_inline u8 select_port_range(struct external_config *ext_config,
