@@ -174,7 +174,7 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
                                               struct frag_hdr *frag_hdr) {
 #define BPF_LOG_TOPIC "_parse_ipv6_packet"
     struct ipv6hdr *ip6h;
-    if (VALIDATE_PULL_L3(skb, &ip6h, l3_off, sizeof(*ip6h))) {
+    if (VALIDATE_PULL(skb, &ip6h, l3_off, sizeof(*ip6h))) {
         return -1;
     }
     if (ip6h->version != 6) {
@@ -340,7 +340,7 @@ static __always_inline int parse_packet_light(struct __sk_buff *skb,
 #define BPF_LOG_TOPIC "parse_packet_light"
     if (is_ipv4) {
         struct iphdr *iph;
-        if (VALIDATE_PULL_L3(skb, &iph, l3_off, sizeof(*iph))) {
+        if (VALIDATE_PULL(skb, &iph, l3_off, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
         *l3_hdr_len = parse_ipv4_packet_light(iph, tuple, nexthdr);
@@ -410,7 +410,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
     int l3_header_len;
     if (eth->h_proto == bpf_htons(ETH_P_IP)) {
         struct iphdr *iph;
-        if (VALIDATE_PULL_L3(skb, &iph, TC_SKB_L3_OFF, sizeof(*iph))) {
+        if (VALIDATE_PULL(skb, &iph, TC_SKB_L3_OFF, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
         l3_header_len = parse_ipv4_packet(pkt, iph);
