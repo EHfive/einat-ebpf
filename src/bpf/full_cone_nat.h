@@ -194,6 +194,19 @@ struct map_ct_value {
 #define COPY_ADDR6(t, s) (__builtin_memcpy((t), (s), sizeof(t)))
 #define ADDR6_EQ(t, s) (0 == __builtin_memcmp((t), (s), sizeof(t)))
 
+static __always_inline void inet_addr_set_ip(union u_inet_addr *addr,
+                                             __be32 ip) {
+    addr->ip = ip;
+    addr->all[1] = 0;
+    addr->all[2] = 0;
+    addr->all[3] = 0;
+}
+
+static __always_inline void inet_addr_set_ip6(union u_inet_addr *addr,
+                                              __be32 ip6[4]) {
+    COPY_ADDR6(addr->ip6, ip6);
+}
+
 static __always_inline void inet_tuple_copy(struct inet_tuple *t1,
                                             const struct inet_tuple *t2) {
 

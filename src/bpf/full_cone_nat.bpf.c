@@ -116,8 +116,8 @@ static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
     if (iph->version != 4) {
         return -1;
     }
-    tuple->saddr.ip = iph->saddr;
-    tuple->daddr.ip = iph->daddr;
+    inet_addr_set_ip(&tuple->saddr, iph->saddr);
+    inet_addr_set_ip(&tuple->daddr, iph->daddr);
     *nexthdr = iph->protocol;
     if (iph->frag_off & bpf_htons(IP_OFFSET)) {
         return -1;
@@ -132,8 +132,8 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     if (iph->version != 4) {
         return -1;
     }
-    pkt->tuple.saddr.ip = iph->saddr;
-    pkt->tuple.daddr.ip = iph->daddr;
+    inet_addr_set_ip(&pkt->tuple.saddr, iph->saddr);
+    inet_addr_set_ip(&pkt->tuple.daddr, iph->daddr);
     pkt->is_ipv4 = true;
     pkt->frag_off = bpf_ntohs((iph->frag_off & bpf_htons(IP_OFFSET)) << 3);
     if (iph->frag_off & bpf_htons(IP_MF)) {
@@ -160,8 +160,8 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
     if (ip6h->version != 6) {
         return -1;
     }
-    COPY_ADDR6(tuple->saddr.ip6, ip6h->saddr.in6_u.u6_addr32);
-    COPY_ADDR6(tuple->daddr.ip6, ip6h->daddr.in6_u.u6_addr32);
+    inet_addr_set_ip6(&tuple->saddr, ip6h->saddr.in6_u.u6_addr32);
+    inet_addr_set_ip6(&tuple->daddr, ip6h->daddr.in6_u.u6_addr32);
 
     u32 frag_hdr_off = 0;
     int len = sizeof(struct ipv6hdr);
@@ -234,22 +234,29 @@ parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
     struct frag_hdr frag_hdr;
     int len =
         _parse_ipv6_packet(skb, l3_off, &pkt->tuple, &pkt->nexthdr, &frag_hdr);
-    if (len < 0 || !frag_hdr.frag_off) {
+    if (len < 0) {
         return len;
     }
 
-    pkt->frag_id = bpf_ntohl(frag_hdr.identification);
-    pkt->frag_off = bpf_ntohs(frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET));
+    if (frag_hdr.frag_off) {
+        pkt->frag_id = bpf_ntohl(frag_hdr.identification);
+        pkt->frag_off =
+            bpf_ntohs(frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET));
 
-    if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_MF)) {
-        pkt->frag_type = FRAG_MORE;
-    } else if (pkt->frag_off) {
-        pkt->frag_type = FRAG_LAST;
+        if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_MF)) {
+            pkt->frag_type = FRAG_MORE;
+        } else if (pkt->frag_off) {
+            pkt->frag_type = FRAG_LAST;
+        } else {
+            // This packet is the last fragment but also the first
+            // fragment as fragmentation offset is 0, so just ignore
+            // the fragmentation.
+            pkt->frag_type = FRAG_NONE;
+        }
     } else {
-        // This packet is the last fragment but also the first
-        // fragment as fragmentation offset is 0, so just ignore
-        // the fragmentation.
         pkt->frag_type = FRAG_NONE;
+        pkt->frag_off = 0;
+        pkt->frag_id = 0;
     }
     return len;
 #undef BPF_LOG_TOPIC
@@ -364,8 +371,8 @@ static __always_inline int parse_packet_light(struct __sk_buff *skb,
 #undef BPF_LOG_TOPIC
 }
 
-// not inline to reduce eBPF verification branches
-static int parse_packet(struct __sk_buff *skb, struct packet_info *pkt) {
+static __always_inline int parse_packet(struct __sk_buff *skb,
+                                        struct packet_info *pkt) {
 #define BPF_LOG_TOPIC "parse_packet"
     void *data_end = ctx_data_end(skb);
     struct ethhdr *eth = ctx_data(skb);
@@ -476,8 +483,8 @@ static int frag_timer_cb(void *_map_frag_track, struct map_frag_track_key *key,
 #undef BPF_LOG_TOPIC
 }
 
-static int fragment_track(struct __sk_buff *skb, struct packet_info *pkt,
-                          u8 flags) {
+static __always_inline int fragment_track(struct __sk_buff *skb,
+                                          struct packet_info *pkt, u8 flags) {
 #define BPF_LOG_TOPIC "fragment_track"
 
     if (pkt->frag_type == FRAG_NONE ||
@@ -743,7 +750,7 @@ static __always_inline void delete_ct(struct map_ct_key *key) {
     }
 
     struct map_binding_key b_key_orig;
-    get_rev_dir_binding_key(&b_key_orig, &b_key, b_value);
+    get_rev_dir_binding_key(&b_key, b_value, &b_key_orig);
 
     bpf_map_delete_elem(&map_binding, &b_key_orig);
     bpf_map_delete_elem(&map_binding, &b_key);
@@ -1027,13 +1034,14 @@ static __always_inline int egress_lookup_or_new_binding(
         }
         // XXX: do NAT64 if origin->daddr has NAT64 prefix
         bool nat_x_4 = is_ipv4;
-        struct map_binding_value b_value_new = {
-            .flags = (nat_x_4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG),
-            .to_port = b_key.from_port,
-            .use = 0,
-        };
+        struct map_binding_value b_value_new;
+        b_value_new.flags = (nat_x_4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG);
+        b_value_new.to_port = b_key.from_port;
+        b_value_new.is_static = false;
+        b_value_new.use = 0;
+        b_value_new.ref = 0;
         if (nat_x_4) {
-            b_value_new.to_addr.ip = g_ipv4_external_addr;
+            inet_addr_set_ip(&b_value_new.to_addr, g_ipv4_external_addr);
         } else {
             // TODO: handle IPv6
         }
@@ -1168,6 +1176,7 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
         ct_value_new.flags =
             (b_value->flags & ADDR_IPV4_FLAG) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
         ct_value_new.state = CT_IN_ONLY;
+        ct_value_new.last_seen = 0;
         COPY_ADDR6(ct_value_new.origin.saddr.all, b_value->to_addr.all);
         ct_value_new.origin.sport = b_value->to_port;
         // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if b_value->flags
@@ -1214,7 +1223,7 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
 SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "ingress<=="
     int ret;
-    struct packet_info pkt = {};
+    struct packet_info pkt;
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
@@ -1247,13 +1256,6 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    struct map_ct_key ct_key = {
-        .ifindex = skb->ifindex,
-        .flags = ADDR_IPV4_FLAG,
-        .l4proto = pkt.nexthdr,
-    };
-    inet_tuple_rev_copy(&ct_key.external, &pkt.tuple);
-
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
     struct map_ct_value *ct_value;
     ret = ingress_lookup_or_new_ct(skb->ifindex, pkt.is_ipv4, pkt.nexthdr,
@@ -1280,7 +1282,7 @@ SEC("tc")
 int egress_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "egress ==>"
     int ret;
-    struct packet_info pkt = {};
+    struct packet_info pkt;
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
@@ -1305,6 +1307,9 @@ int egress_snat(struct __sk_buff *skb) {
 
     if ((ret = fragment_track(skb, &pkt, FRAG_TRACK_EGRESS_FLAG)) !=
         TC_ACT_OK) {
+        if (ret == TC_ACT_UNSPEC) {
+            goto check_hairpin;
+        }
         return ret;
     }
 
