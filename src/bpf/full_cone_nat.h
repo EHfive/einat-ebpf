@@ -8,6 +8,10 @@
 
 #include "bpf_log.h"
 
+#ifndef FEAT_IPV6
+// #define FEAT_IPV6
+#endif
+
 // #include <linux/if_ether.h>
 #define ETH_P_IP 0x0800
 #define ETH_P_IPV6 0x86DD
@@ -73,9 +77,14 @@
 #define TC_SKB_L3_OFF (sizeof(struct ethhdr))
 
 union u_inet_addr {
+#ifdef FEAT_IPV6
     __u32 all[4];
     __be32 ip;
     __be32 ip6[4];
+#else
+    __u32 all[1];
+    __be32 ip;
+#endif
 };
 
 struct inet_tuple {
@@ -124,7 +133,7 @@ struct dest_config {
 #define BINDING_ORIG_DIR_FLAG (1 << 0)
 #define FRAG_TRACK_EGRESS_FLAG (1 << 0)
 #define ADDR_IPV4_FLAG (1 << 1)
-#define ADDR_IPV6_FLAG (1 << 2) // not supported yet
+#define ADDR_IPV6_FLAG (1 << 2)
 
 // NOTE: all map key structs have to explicitly padded and the padding fields
 // need to be zeroed
@@ -197,15 +206,19 @@ struct map_ct_value {
 static __always_inline void inet_addr_set_ip(union u_inet_addr *addr,
                                              __be32 ip) {
     addr->ip = ip;
+#ifdef FEAT_IPV6
     addr->all[1] = 0;
     addr->all[2] = 0;
     addr->all[3] = 0;
+#endif
 }
 
+#ifdef FEAT_IPV6
 static __always_inline void inet_addr_set_ip6(union u_inet_addr *addr,
                                               __be32 ip6[4]) {
     COPY_ADDR6(addr->ip6, ip6);
 }
+#endif
 
 static __always_inline void inet_tuple_copy(struct inet_tuple *t1,
                                             const struct inet_tuple *t2) {
@@ -292,8 +305,8 @@ static __always_inline int bpf_write_inet_addr(struct __sk_buff *skb,
                                                bool is_ipv4, int addr_off,
                                                union u_inet_addr *to_addr) {
     return bpf_skb_store_bytes(
-        skb, addr_off, is_ipv4 ? &to_addr->ip : to_addr->ip6,
-        is_ipv4 ? sizeof(to_addr->ip) : sizeof(to_addr->ip6), 0);
+        skb, addr_off, is_ipv4 ? &to_addr->ip : to_addr->all,
+        is_ipv4 ? sizeof(to_addr->ip) : sizeof(to_addr->all), 0);
 }
 
 static __always_inline int bpf_write_port(struct __sk_buff *skb, int port_off,

@@ -14,9 +14,8 @@ opt-level = "z"
 strip = true
 
 [features]
-default = ["bpf_atomic"]
-# Enable the use of atomics in BPF program
-bpf_atomic = []
+default = []
+ipv6 = []
 # Link against static `libelf` and `zlib`.
 static = ["libbpf-sys/static"]
 #

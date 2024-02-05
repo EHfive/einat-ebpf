@@ -31,6 +31,15 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_lpm_key);
+    __type(value, struct dest_config);
+    __uint(max_entries, 1024);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} map_ipv4_dest_config SEC(".maps");
+
+#ifdef FEAT_IPV6
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv6_lpm_key);
     __type(value, struct external_config);
     __uint(max_entries, 1024);
@@ -39,19 +48,12 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
-    __type(key, struct ipv4_lpm_key);
-    __type(value, struct dest_config);
-    __uint(max_entries, 1024);
-    __uint(map_flags, BPF_F_NO_PREALLOC);
-} map_ipv4_dest_config SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __type(key, struct ipv6_lpm_key);
     __type(value, struct dest_config);
     __uint(max_entries, 1024);
     __uint(map_flags, BPF_F_NO_PREALLOC);
 } map_ipv6_dest_config SEC(".maps");
+#endif
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -80,7 +82,9 @@ struct {
 } map_ct SEC(".maps");
 
 struct packet_info {
+#ifdef FEAT_IPV6
     bool is_ipv4;
+#endif
     // `nexthdr` and `tuple` fields reflect embedded ICMP error IP packet in
     // case of ICMP error message, otherwise reflect TCP, UDP, or ICMP query
     // message.
@@ -97,8 +101,20 @@ struct packet_info {
     int err_l4_off;
 };
 
+#ifdef FEAT_IPV6
+#define IS_IPV4(pkt) ((pkt)->is_ipv4)
+#define FLAGS_IS_IPV4(flags) ((flags)&ADDR_IPV4_FLAG)
+#else
+#define IS_IPV4(pkt) (true)
+#define FLAGS_IS_IPV4(flags) (true)
+#endif
+
 static __always_inline bool is_icmpx(u8 nexthdr) {
+#ifdef FEAT_IPV6
     return nexthdr == IPPROTO_ICMP || nexthdr == NEXTHDR_ICMP;
+#else
+    return nexthdr == IPPROTO_ICMP;
+#endif
 }
 
 static __always_inline int icmpx_err_l3_offset(int l4_off) {
@@ -134,7 +150,9 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     }
     inet_addr_set_ip(&pkt->tuple.saddr, iph->saddr);
     inet_addr_set_ip(&pkt->tuple.daddr, iph->daddr);
+#ifdef FEAT_IPV6
     pkt->is_ipv4 = true;
+#endif
     pkt->frag_off = bpf_ntohs((iph->frag_off & bpf_htons(IP_OFFSET)) << 3);
     if (iph->frag_off & bpf_htons(IP_MF)) {
         pkt->frag_type = FRAG_MORE;
@@ -148,6 +166,8 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     return (iph->ihl * 4);
 #undef BPF_LOG_TOPIC
 }
+
+#ifdef FEAT_IPV6
 static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
                                               struct inet_tuple *tuple,
                                               u8 *nexthdr,
@@ -261,6 +281,7 @@ parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
     return len;
 #undef BPF_LOG_TOPIC
 }
+#endif
 
 enum {
     ICMP_ERROR_MSG,
@@ -286,6 +307,7 @@ static __always_inline int icmpx_msg_type(bool is_ipv4, u8 nexthdr,
         case ICMP_TIMESTAMPREPLY:
             return ICMP_QUERY_MSG;
         }
+#ifdef FEAT_IPV6
     } else if (nexthdr == NEXTHDR_ICMP) {
         if (is_ipv4) {
             return TC_ACT_SHOT;
@@ -301,6 +323,7 @@ static __always_inline int icmpx_msg_type(bool is_ipv4, u8 nexthdr,
         case ICMPV6_ECHO_REPLY:
             return ICMP_QUERY_MSG;
         }
+#endif
     }
     return ICMP_ACT_UNSPEC;
 }
@@ -322,7 +345,11 @@ static __always_inline int parse_packet_light(struct __sk_buff *skb,
         }
         *l3_hdr_len = parse_ipv4_packet_light(iph, tuple, nexthdr);
     } else {
+#ifdef FEAT_IPV6
         *l3_hdr_len = parse_ipv6_packet_light(skb, l3_off, tuple, nexthdr);
+#else
+        return TC_ACT_UNSPEC;
+#endif
     }
     if (*l3_hdr_len < 0) {
         return TC_ACT_SHOT;
@@ -387,8 +414,10 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
             return TC_ACT_SHOT;
         }
         l3_header_len = parse_ipv4_packet(pkt, iph);
+#ifdef FEAT_IPV6
     } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
         l3_header_len = parse_ipv6_packet(skb, pkt, TC_SKB_L3_OFF);
+#endif
     } else {
         return TC_ACT_UNSPEC;
     }
@@ -424,25 +453,23 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         if (VALIDATE_PULL(skb, &icmph, pkt->l4_off, sizeof(struct icmphdr))) {
             return TC_ACT_SHOT;
         }
-        int ret = icmpx_msg_type(pkt->is_ipv4, pkt->nexthdr, icmph);
+        int ret = icmpx_msg_type(IS_IPV4(pkt), pkt->nexthdr, icmph);
         switch (ret) {
         case ICMP_ERROR_MSG: {
             struct inet_tuple err_tuple = {};
             int err_l3_hdr_len;
             ret = parse_packet_light(
-                skb, pkt->is_ipv4, icmpx_err_l3_offset(pkt->l4_off), &err_tuple,
+                skb, IS_IPV4(pkt), icmpx_err_l3_offset(pkt->l4_off), &err_tuple,
                 &pkt->nexthdr, &err_l3_hdr_len);
             if (ret != TC_ACT_OK) {
                 return ret;
             }
             pkt->err_l4_off = icmpx_err_l3_offset(pkt->l4_off) + err_l3_hdr_len;
-            pkt->tuple.sport = err_tuple.dport;
-            pkt->tuple.dport = err_tuple.sport;
             bpf_log_trace(
                 "ICMP error nexthdr:%d, %pI4->%pI4, %pI4->%pI4, %d->%d",
                 pkt->nexthdr, &pkt->tuple.saddr.ip, &pkt->tuple.daddr.ip,
                 &err_tuple.saddr.ip, &err_tuple.daddr.ip,
-                bpf_ntohs(pkt->tuple.sport), bpf_ntohs(pkt->tuple.dport));
+                bpf_ntohs(err_tuple.sport), bpf_ntohs(err_tuple.dport));
 
             if (!ADDR6_EQ(pkt->tuple.daddr.all, err_tuple.saddr.all)) {
                 bpf_log_error("IP destination address does not match source "
@@ -499,7 +526,7 @@ static __always_inline int fragment_track(struct __sk_buff *skb,
     int ret;
     struct map_frag_track_key key = {
         .ifindex = skb->ifindex,
-        .flags = (pkt->is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG) | flags,
+        .flags = (IS_IPV4(pkt) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG) | flags,
         .l4proto = pkt->nexthdr,
         .id = pkt->frag_id,
         .saddr = pkt->tuple.saddr,
@@ -559,10 +586,14 @@ lookup_dest_config(bool is_ipv4, const union u_inet_addr *external_addr) {
         struct ipv4_lpm_key key = {.prefixlen = 32, .ip = external_addr->ip};
         return bpf_map_lookup_elem(&map_ipv4_dest_config, &key);
     } else {
+#ifdef FEAT_IPV6
         struct ipv6_lpm_key key;
         key.prefixlen = 128;
         COPY_ADDR6(key.ip6, external_addr->ip6);
         return bpf_map_lookup_elem(&map_ipv6_dest_config, &key);
+#else
+        return NULL;
+#endif
     }
 }
 
@@ -580,10 +611,14 @@ lookup_external_config(bool is_ipv4, const union u_inet_addr *external_addr) {
         struct ipv4_lpm_key key = {.prefixlen = 32, .ip = external_addr->ip};
         return bpf_map_lookup_elem(&map_ipv4_external_config, &key);
     } else {
+#ifdef FEAT_IPV6
         struct ipv6_lpm_key key;
         key.prefixlen = 128;
         COPY_ADDR6(key.ip6, external_addr->ip6);
         return bpf_map_lookup_elem(&map_ipv6_external_config, &key);
+#else
+        return NULL;
+#endif
     }
 }
 
@@ -851,10 +886,16 @@ modify_headers(struct __sk_buff *skb, bool is_ipv4, bool is_icmpx_error,
         l4_check_mangle_0 = is_ipv4;
         break;
     case IPPROTO_ICMP:
+#ifdef FEAT_IPV6
     case NEXTHDR_ICMP:
+#endif
         l4_to_port_off = offsetof(struct icmphdr, un.echo.id);
         l4_to_check_off = offsetof(struct icmphdr, checksum);
+#ifdef FEAT_IPV6
         l4_check_pseudo = nexthdr == NEXTHDR_ICMP;
+#else
+        l4_check_pseudo = false;
+#endif
         l4_check_mangle_0 = false;
         break;
     default:
@@ -1085,12 +1126,13 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
     struct map_ct_key ct_key;
     ct_key.ifindex = ifindex;
     ct_key.flags =
-        (b_value->flags & ADDR_IPV4_FLAG) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
+        FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
     ct_key.l4proto = l4proto;
     ct_key._pad = 0;
     COPY_ADDR6(ct_key.external.saddr.all, b_value->to_addr.all);
     ct_key.external.sport = b_value->to_port;
-    // XXX: do NAT64 if b_value->flags contains ADDR_IPV4_FLAG
+    // XXX: do NAT64 if origin is IPv6 and b_value->flags contains
+    // ADDR_IPV4_FLAG
     COPY_ADDR6(ct_key.external.daddr.all, origin->daddr.all);
     ct_key.external.dport = origin->dport;
 
@@ -1174,13 +1216,13 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
 
         struct map_ct_value ct_value_new;
         ct_value_new.flags =
-            (b_value->flags & ADDR_IPV4_FLAG) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
+            FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
         ct_value_new.state = CT_IN_ONLY;
         ct_value_new.last_seen = 0;
         COPY_ADDR6(ct_value_new.origin.saddr.all, b_value->to_addr.all);
         ct_value_new.origin.sport = b_value->to_port;
-        // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if b_value->flags
-        // contains ADDR_IPV4_FLAG
+        // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if reply is IPv4 and
+        // b_value->flags contains ADDR_IPV6_FLAG
         COPY_ADDR6(ct_value_new.origin.daddr.all, reply->saddr.all);
         ct_value_new.origin.dport = reply->sport;
 
@@ -1232,12 +1274,13 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) || !pkt.is_ipv4) {
+    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) ||
+        !IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 
     struct dest_config *dest_config =
-        lookup_dest_config(pkt.is_ipv4, &pkt.tuple.saddr);
+        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
     if (dest_config && dest_pass_nat(dest_config)) {
         return TC_ACT_UNSPEC;
     }
@@ -1247,7 +1290,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     struct external_config *ext_config =
-        lookup_external_config(pkt.is_ipv4, &pkt.tuple.daddr);
+        lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
     if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
         return ret;
     }
@@ -1258,14 +1301,14 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
     struct map_ct_value *ct_value;
-    ret = ingress_lookup_or_new_ct(skb->ifindex, pkt.is_ipv4, pkt.nexthdr,
+    ret = ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
                                    is_icmpx_error, &pkt.tuple, &ct_value);
     if (ret != TC_ACT_OK) {
         return ret;
     }
 
     // modify dest
-    ret = modify_headers(skb, pkt.is_ipv4, is_icmpx_error, pkt.nexthdr,
+    ret = modify_headers(skb, IS_IPV4(&pkt), is_icmpx_error, pkt.nexthdr,
                          TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, false,
                          &pkt.tuple.daddr, pkt.tuple.dport,
                          &ct_value->origin.saddr, ct_value->origin.sport);
@@ -1291,13 +1334,14 @@ int egress_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) || !pkt.is_ipv4) {
+    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) ||
+        !IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 
     bool do_hairpin = false;
     struct dest_config *dest_config =
-        lookup_dest_config(pkt.is_ipv4, &pkt.tuple.saddr);
+        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
     if (dest_config) {
         do_hairpin = dest_hairpin(dest_config);
         if (dest_pass_nat(dest_config)) {
@@ -1314,7 +1358,7 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     struct external_config *ext_config =
-        lookup_external_config(pkt.is_ipv4, &pkt.tuple.saddr);
+        lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
     if (ext_config) { // this packet was send from local NAT host
         if (external_pass_nat(ext_config)) {
             goto check_hairpin;
@@ -1338,7 +1382,7 @@ int egress_snat(struct __sk_buff *skb) {
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
     struct map_binding_value *b_value, *b_value_rev;
-    ret = egress_lookup_or_new_binding(skb->ifindex, pkt.is_ipv4, pkt.nexthdr,
+    ret = egress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
                                        is_icmpx_error, &pkt.tuple, &b_value,
                                        &b_value_rev);
     if (ret == TC_ACT_UNSPEC) {
@@ -1350,8 +1394,8 @@ int egress_snat(struct __sk_buff *skb) {
 
     if (!b_value->is_static) {
         struct map_ct_value *ct_value = egress_lookup_or_new_ct(
-            skb->ifindex, pkt.is_ipv4, pkt.nexthdr, is_icmpx_error, &pkt.tuple,
-            b_value, b_value_rev);
+            skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr, is_icmpx_error,
+            &pkt.tuple, b_value, b_value_rev);
         if (!ct_value) {
             return TC_ACT_SHOT;
         }
@@ -1359,7 +1403,7 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     // modify source
-    ret = modify_headers(skb, pkt.is_ipv4, is_icmpx_error, pkt.nexthdr,
+    ret = modify_headers(skb, IS_IPV4(&pkt), is_icmpx_error, pkt.nexthdr,
                          TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, true,
                          &pkt.tuple.saddr, pkt.tuple.sport, &b_value->to_addr,
                          b_value->to_port);
