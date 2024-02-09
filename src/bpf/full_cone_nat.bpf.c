@@ -1367,7 +1367,7 @@ int egress_snat(struct __sk_buff *skb) {
             return TC_ACT_SHOT;
         }
         if (!nat_in_binding_range(ext_config, pkt.nexthdr,
-                                  bpf_ntohs(pkt.tuple.dport))) {
+                                  bpf_ntohs(pkt.tuple.sport))) {
             goto check_hairpin;
         }
 
