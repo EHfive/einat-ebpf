@@ -1041,6 +1041,8 @@ static int __always_inline fill_unique_binding_port(
                             ctx.range.begin_port;
         }
 
+        // XXX: requires Linux kernel>=5.17, add fallback to use bounded loop or
+        // unrolled loop to support linux kernel 5.15
         bpf_loop(65536, find_port_cb, &ctx, 0);
         if (ctx.found) {
             val_orig->to_port = ctx.key.from_port;
@@ -1214,6 +1216,8 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
             return TC_ACT_UNSPEC;
         }
 
+        // TODO: use initialization helper to set or initialize ever fields
+        // manually
         struct map_ct_value ct_value_new;
         ct_value_new.flags =
             FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
@@ -1225,6 +1229,10 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
         // b_value->flags contains ADDR_IPV6_FLAG
         COPY_ADDR6(ct_value_new.origin.daddr.all, reply->saddr.all);
         ct_value_new.origin.dport = reply->sport;
+        ct_value_new._pad1 = 0;
+        ct_value_new._pad2 = 0;
+        ct_value_new.timer.__opaque[0] = 0;
+        ct_value_new.timer.__opaque[1] = 0;
 
         ct_value = insert_new_ct(&ct_key, &ct_value_new);
         if (!ct_value) {
@@ -1265,7 +1273,8 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
 SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "ingress<=="
     int ret;
-    struct packet_info pkt;
+    // XXX: just use local variables instead
+    struct packet_info pkt = {};
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
@@ -1325,7 +1334,7 @@ SEC("tc")
 int egress_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "egress ==>"
     int ret;
-    struct packet_info pkt;
+    struct packet_info pkt = {};
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {

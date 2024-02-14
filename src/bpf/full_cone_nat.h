@@ -151,7 +151,7 @@ struct map_frag_track_key {
 struct map_frag_track_value {
     __be16 sport;
     __be16 dport;
-
+    u32 _pad;
     struct bpf_timer timer;
 };
 
@@ -195,8 +195,10 @@ enum ct_state {
 struct map_ct_value {
     struct inet_tuple origin;
     u8 flags;
+    u8 _pad1;
     u16 state;
     u32 last_seen;
+    u32 _pad2;
     struct bpf_timer timer;
 };
 
