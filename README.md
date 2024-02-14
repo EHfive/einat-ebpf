@@ -7,7 +7,7 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 
 ## Requirement
 
--   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
+-   Linux kernel >= 5.17 (compiled with BPF and BTF support) on target machine
 -   `libelf` from elfutils
 -   `zlib`
 -   `clang` to compile BPF C code
