@@ -426,13 +426,15 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         return TC_ACT_SHOT;
     }
 
+    pkt->err_l4_off = -1;
     if (pkt->frag_type != FRAG_NONE && pkt->frag_off != 0) {
         // not the first fragment
         pkt->l4_off = -1;
+        pkt->tuple.sport = 0;
+        pkt->tuple.dport = 0;
         return TC_ACT_OK;
     }
     pkt->l4_off = TC_SKB_L3_OFF + l3_header_len;
-    pkt->err_l4_off = -1;
 
     if (pkt->nexthdr == IPPROTO_TCP) {
         struct tcphdr *tcph;
@@ -1274,7 +1276,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "ingress<=="
     int ret;
     // XXX: just use local variables instead
-    struct packet_info pkt = {};
+    struct packet_info pkt;
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
@@ -1334,7 +1336,7 @@ SEC("tc")
 int egress_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "egress ==>"
     int ret;
-    struct packet_info pkt = {};
+    struct packet_info pkt;
 
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
