@@ -316,7 +316,6 @@ static __always_inline int bpf_write_port(struct __sk_buff *skb, int port_off,
     return bpf_skb_store_bytes(skb, port_off, &to_port, sizeof(to_port), 0);
 }
 
-// Avoid modifying context register while accessing data, data_end fields,
 // copied from cilium, see
 // https://github.com/cilium/cilium/commit/847014aa62f94e5a53178670cad1eacea455b227
 #define DEFINE_FUNC_CTX_POINTER(FIELD)                                         \
@@ -347,10 +346,13 @@ static __always_inline int _validate_pull(struct __sk_buff *skb, void **hdr_,
     u8 *data_end = (u8 *)ctx_data_end(skb);
     u8 *hdr = data + off;
 
+    // ensure hdr pointer is on it's own for validation to work
+    barrier_var(hdr);
     if (hdr + len > data_end) {
         if (bpf_skb_pull_data(skb, off + len)) {
             return 1;
         }
+
         data = (u8 *)ctx_data(skb);
         data_end = (u8 *)ctx_data_end(skb);
         hdr = data + off;
