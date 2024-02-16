@@ -24,9 +24,19 @@ enum bpf_log_level {
 #define BPF_LOG_LEVEL BPF_LOG_LEVEL_DEBUG;
 #define BPF_LOG_TOPIC "default"
 
+#define _bpf_vprintk_exists                                                    \
+    bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_trace_vprintk)
+
+#define _bpf_check_printk(...)                                                 \
+    ___bpf_nth(_, ##__VA_ARGS__, _bpf_vprintk_exists, _bpf_vprintk_exists,     \
+               _bpf_vprintk_exists, _bpf_vprintk_exists, _bpf_vprintk_exists,  \
+               _bpf_vprintk_exists, _bpf_vprintk_exists, _bpf_vprintk_exists,  \
+               _bpf_vprintk_exists, true /*3*/, true /*2*/, true /*1*/,        \
+               true /*0*/)
+
 #define _bpf_log_logv(level, fmt, args...)                                     \
     ({                                                                         \
-        if (BPF_LOG_LEVEL >= level) {                                          \
+        if (BPF_LOG_LEVEL >= level && _bpf_check_printk(args)) {               \
             bpf_printk("[b-f-c-n][" _##level##_TOKEN "] " BPF_LOG_TOPIC        \
                                                      " : " fmt,                \
                        ##args);                                                \
