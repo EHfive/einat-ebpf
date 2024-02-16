@@ -3,6 +3,7 @@
 
 #include "kernel/vmlinux.h"
 
+#include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 
@@ -110,6 +111,9 @@ struct port_range {
 };
 
 #define MAX_PORT_RANGES 4
+// We do random port collision test in unrolled loop on Linux kernel without
+// bpf_loop support
+#define MAX_PORT_COLLISION_TRIES 32
 
 struct external_config {
     struct port_range tcp_range[MAX_PORT_RANGES];
