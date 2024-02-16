@@ -24,7 +24,7 @@ OPTIONS:
   -i, --ifname             Network interface name, e.g. eth0
       --ifindex            Network interface index number, e.g. 2
       --external-ip        Static external IP address
-      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 2, WARN
+      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 0, disabled
 ";
 
 #[derive(Default)]
@@ -150,10 +150,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut open_skel = skel_builder.open()?;
 
     open_skel.rodata_mut().ENABLE_FIB_LOOKUP_SRC = 0;
+    open_skel.rodata_mut().LOG_LEVEL = args.log_level.unwrap_or(0).min(5);
 
     let mut skel = open_skel.load()?;
 
-    skel.data_mut().g_log_level = args.log_level.unwrap_or(5).min(5);
     set_map_config(&mut skel, ip_addr)?;
 
     let progs = skel.progs();

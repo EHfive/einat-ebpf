@@ -6,6 +6,8 @@
 #define DEFAULT_BINDING_MAX_ENTRIES (65536 * 2)
 #define DEFAULT_CONNTRACK_MAX_ENTRIES (65536 * 2)
 
+const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
+
 // Lookup external source address from FIB instead of using
 // g_ipv4_external_addr, requires Linux kernel>=6.7
 const volatile u8 ENABLE_FIB_LOOKUP_SRC = 0;
@@ -15,11 +17,10 @@ const volatile u8 ENABLE_FIB_LOOKUP_SRC = 0;
 const volatile u64 TIMEOUT_FRAGMENT = 2E9;
 
 u32 g_ipv4_external_addr SEC(".data") = 0;
-u8 g_log_level SEC(".data") = BPF_LOG_LEVEL_DEBUG;
 
 #undef BPF_LOG_LEVEL
 #undef BPF_LOG_TOPIC
-#define BPF_LOG_LEVEL g_log_level
+#define BPF_LOG_LEVEL LOG_LEVEL
 
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);

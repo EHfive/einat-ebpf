@@ -44,7 +44,7 @@ table ip nat {
 }
 ```
 
-View BPF tracing logs with
+Enable debug logging with `--bpf-log 4` flag and view BPF tracing logs with
 
 ```shell
 cat /sys/kernel/debug/tracing/trace_pipe
