@@ -1242,7 +1242,8 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
         // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if reply is IPv4 and
         // b_value->flags contains ADDR_IPV6_FLAG
         COPY_ADDR6(ct_value_new.origin.daddr.all, reply->saddr.all);
-        ct_value_new.origin.dport = reply->sport;
+        ct_value_new.origin.dport =
+            is_icmpx(l4proto) ? b_value->to_port : reply->sport;
         ct_value_new._pad = 0;
         ct_value_new.seq = b_value->seq;
         ct_value_new.timer.__opaque[0] = 0;
@@ -1296,7 +1297,8 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool lookup_only,
     // XXX: do NAT64 if origin is IPv6 and b_value->flags contains
     // ADDR_IPV4_FLAG
     COPY_ADDR6(ct_key.external.daddr.all, origin->daddr.all);
-    ct_key.external.dport = origin->dport;
+    ct_key.external.dport =
+        is_icmpx(l4proto) ? b_value->to_port : origin->dport;
 
     struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
     if (ct_value && ct_value->seq != b_value->seq) {
