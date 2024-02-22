@@ -10,13 +10,24 @@ const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
 
 // Lookup external source address from FIB instead of using
 // g_ipv4_external_addr, requires Linux kernel>=6.7
-const volatile u8 ENABLE_FIB_LOOKUP_SRC = 0;
+const volatile u8 ENABLE_FIB_LOOKUP_SRC = false;
+
+// Allow inbound initiated binding towards local NAT host for ICMP query message
+// Vulnerability: This could cause the NAT running out of ICMP IDs if an
+// attacker is flooding ICMP packets of all ICMP IDs(0-65536) to NAT host,
+// causing internal hosts behind NAT failed to create new binding hence
+// resulting network disconnection for ICMP. A possible workaround is to add a
+// limit for maximum inbound initiated bindings allowed to reserve ICMP IDs for
+// non-local NAT usage.
+const volatile u8 ALLOW_INBOUND_ICMPX = true;
 
 // at least FRAGMENT_MIN=2s,
 // https://datatracker.ietf.org/doc/html/rfc6146#section-4
 const volatile u64 TIMEOUT_FRAGMENT = 2E9;
 
 u32 g_ipv4_external_addr SEC(".data") = 0;
+
+u32 g_next_binding_seq SEC(".data") = 0;
 
 #undef BPF_LOG_LEVEL
 #undef BPF_LOG_TOPIC
@@ -734,7 +745,7 @@ insert_new_binding(const struct map_binding_key *key,
         .flags = key->flags & (~BINDING_ORIG_DIR_FLAG),
         .to_port = key->from_port,
         .to_addr = key->from_addr,
-        .use = 0,
+        .seq = val->seq,
     };
     ret = bpf_map_update_elem(&map_binding, key, val, BPF_NOEXIST);
     if (ret) {
@@ -778,7 +789,7 @@ static __always_inline void delete_ct(struct map_ct_key *key) {
     if (!b_value) {
         goto delete_ct;
     }
-    if (ct_value->state == CT_IN_ONLY) {
+    if (ct_value->state == CT_INIT_IN) {
         if (__sync_sub_and_fetch(&b_value->ref, 1) != 0) {
             goto delete_ct;
         }
@@ -1021,15 +1032,9 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx) {
 }
 
 static int __always_inline fill_unique_binding_port(
-    bool val_is_ipv4, u8 l4proto, const struct map_binding_key *key_orig,
-    struct map_binding_value *val_orig) {
+    struct external_config *ext_config, u8 l4proto,
+    const struct map_binding_key *key, struct map_binding_value *val) {
 #define BPF_LOG_TOPIC "find_binding_port"
-    int ret;
-    struct external_config *ext_config =
-        lookup_external_config(val_is_ipv4, &val_orig->to_addr);
-    if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
-        return ret;
-    }
 
     struct port_range *proto_range;
     u8 range_len = select_port_range(ext_config, l4proto, &proto_range);
@@ -1042,8 +1047,8 @@ static int __always_inline fill_unique_binding_port(
 
     struct find_port_ctx ctx;
 
-    get_rev_dir_binding_key(key_orig, val_orig, &ctx.key);
-    ctx.orig_port = bpf_ntohs(key_orig->from_port);
+    get_rev_dir_binding_key(key, val, &ctx.key);
+    ctx.orig_port = bpf_ntohs(key->from_port);
     ctx.curr_port = bpf_ntohs(ctx.key.from_port);
     ctx.found = false;
 
@@ -1078,7 +1083,7 @@ static int __always_inline fill_unique_binding_port(
         }
 
         if (ctx.found) {
-            val_orig->to_port = ctx.key.from_port;
+            val->to_port = ctx.key.from_port;
             return TC_ACT_OK;
         }
     }
@@ -1086,6 +1091,57 @@ static int __always_inline fill_unique_binding_port(
     bpf_log_warn("out of binding port");
     return TC_ACT_SHOT;
 #undef BPF_LOG_TOPIC
+}
+
+static __always_inline void
+partial_init_binding_value(bool is_ipv4, __be16 to_port,
+                           struct map_binding_value *val) {
+
+    val->flags = (is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG);
+    val->to_port = to_port;
+    val->is_static = false;
+    val->use = 0;
+    val->ref = 0;
+    val->seq = __sync_fetch_and_add(&g_next_binding_seq, 1);
+}
+
+static __always_inline int
+ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
+                              struct external_config *ext_config, u8 l4proto,
+                              bool lookup_only, const struct inet_tuple *reply,
+                              struct map_binding_value **b_value_) {
+    struct map_binding_key b_key = {
+        .ifindex = ifindex,
+        .flags = (is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG),
+        .l4proto = l4proto,
+        .from_port = reply->dport,
+        .from_addr = reply->daddr,
+    };
+
+    struct map_binding_value *b_value =
+        bpf_map_lookup_elem(&map_binding, &b_key);
+    if (!b_value) {
+        if (lookup_only) {
+            return TC_ACT_SHOT;
+        }
+        struct map_binding_value b_value_new;
+        partial_init_binding_value(is_ipv4, b_key.from_port, &b_value_new);
+        COPY_ADDR6(b_value_new.to_addr.all, b_key.from_addr.all);
+
+        int ret =
+            fill_unique_binding_port(ext_config, l4proto, &b_key, &b_value_new);
+        if (ret != TC_ACT_OK) {
+            return TC_ACT_SHOT;
+        }
+
+        b_value = insert_new_binding(&b_key, &b_value_new, NULL);
+        if (!b_value) {
+            return TC_ACT_SHOT;
+        }
+    }
+
+    *b_value_ = b_value;
+    return TC_ACT_OK;
 }
 
 static __always_inline int
@@ -1112,21 +1168,24 @@ egress_lookup_or_new_binding(u32 ifindex, bool is_ipv4, u8 l4proto,
         // XXX: do NAT64 if origin->daddr has NAT64 prefix
         bool nat_x_4 = is_ipv4;
         struct map_binding_value b_value_new;
-        b_value_new.flags = (nat_x_4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG);
-        b_value_new.to_port = b_key.from_port;
-        b_value_new.is_static = false;
-        b_value_new.use = 0;
-        b_value_new.ref = 0;
+        partial_init_binding_value(nat_x_4, b_key.from_port, &b_value_new);
         if (nat_x_4) {
             inet_addr_set_ip(&b_value_new.to_addr, g_ipv4_external_addr);
         } else {
             // TODO: handle IPv6
         }
 
-        int ret =
-            fill_unique_binding_port(nat_x_4, l4proto, &b_key, &b_value_new);
-        if (ret != TC_ACT_OK) {
+        int ret;
+        struct external_config *ext_config =
+            lookup_external_config(nat_x_4, &b_value_new.to_addr);
+        if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
             return ret;
+        }
+
+        ret =
+            fill_unique_binding_port(ext_config, l4proto, &b_key, &b_value_new);
+        if (ret != TC_ACT_OK) {
+            return TC_ACT_SHOT;
         }
 
         b_value = insert_new_binding(&b_key, &b_value_new, &b_value_rev);
@@ -1134,10 +1193,63 @@ egress_lookup_or_new_binding(u32 ifindex, bool is_ipv4, u8 l4proto,
             return TC_ACT_SHOT;
         }
     }
+
     *b_value_ = b_value;
     *b_value_rev_ = b_value_rev;
-
     return TC_ACT_OK;
+}
+
+static __always_inline struct map_ct_value *
+ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
+                         bool lookup_only, const struct inet_tuple *reply,
+                         struct map_binding_value *b_value) {
+#define BPF_LOG_TOPIC "ingress_lookup_or_new_ct"
+    struct map_ct_key ct_key;
+    ct_key.ifindex = ifindex;
+    ct_key.flags = is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
+    ct_key.l4proto = l4proto;
+    ct_key._pad = 0;
+    inet_tuple_rev_copy(&ct_key.external, reply);
+
+    struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
+    if (!ct_value) {
+        if (lookup_only) {
+            return NULL;
+        }
+        // TODO: use initialization helper to set or initialize ever fields
+        // manually
+        struct map_ct_value ct_value_new;
+        ct_value_new.flags =
+            FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
+        ct_value_new.state = CT_INIT_IN;
+        ct_value_new.last_seen = 0;
+        COPY_ADDR6(ct_value_new.origin.saddr.all, b_value->to_addr.all);
+        ct_value_new.origin.sport = b_value->to_port;
+        // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if reply is IPv4 and
+        // b_value->flags contains ADDR_IPV6_FLAG
+        COPY_ADDR6(ct_value_new.origin.daddr.all, reply->saddr.all);
+        ct_value_new.origin.dport = reply->sport;
+        ct_value_new._pad = 0;
+        ct_value_new.seq = b_value->seq;
+        ct_value_new.timer.__opaque[0] = 0;
+        ct_value_new.timer.__opaque[1] = 0;
+
+        ct_value = insert_new_ct(&ct_key, &ct_value_new);
+        if (!ct_value) {
+            return NULL;
+        }
+        __sync_fetch_and_add(&b_value->ref, 1);
+
+        bpf_log_debug("insert new CT");
+    } else if (!lookup_only && ct_value->state == CT_INIT_IN) {
+        if (__sync_fetch_and_add(&b_value->use, 0) != 0) {
+            bpf_log_error("refresh CT");
+            bpf_timer_start(&ct_value->timer, 30E9, 0);
+        }
+    }
+
+    return ct_value;
+#undef BPF_LOG_TOPIC
 }
 
 static __always_inline struct map_ct_value *
@@ -1179,11 +1291,11 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool lookup_only,
         }
         ENSURE_REV_BINDING();
 
-        struct map_ct_value ct_value_new = {
-            .flags = is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG,
-            .origin = *origin,
-            .state = CT_ESTABLISHED,
-        };
+        struct map_ct_value ct_value_new = {.flags = is_ipv4 ? ADDR_IPV4_FLAG
+                                                             : ADDR_IPV6_FLAG,
+                                            .origin = *origin,
+                                            .state = CT_ESTABLISHED,
+                                            .seq = b_value->seq};
         ct_value = insert_new_ct(&ct_key, &ct_value_new);
         if (!ct_value) {
             return NULL;
@@ -1194,7 +1306,7 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool lookup_only,
         __sync_fetch_and_add(&b_value_rev->use, 1);
 
         bpf_log_debug("insert new CT");
-    } else if (!lookup_only && ct_value->state == CT_IN_ONLY) {
+    } else if (!lookup_only && ct_value->state == CT_INIT_IN) {
         ENSURE_REV_BINDING();
         // XXX: use lock?
         ct_value->state = CT_ESTABLISHED;
@@ -1205,99 +1317,6 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool lookup_only,
 #undef ENSURE_REV_BINDING
 
     return ct_value;
-#undef BPF_LOG_TOPIC
-}
-
-static __always_inline int
-ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
-                         bool lookup_only, const struct inet_tuple *reply,
-                         struct map_ct_value **ct_value_) {
-#define BPF_LOG_TOPIC "ingress_lookup_or_new_ct"
-    struct map_ct_key ct_key;
-    ct_key.ifindex = ifindex;
-    ct_key.flags = is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
-    ct_key.l4proto = l4proto;
-    ct_key._pad = 0;
-    inet_tuple_rev_copy(&ct_key.external, reply);
-
-    struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
-    if (!ct_value) {
-        if (lookup_only) {
-            return TC_ACT_SHOT;
-        }
-        struct map_binding_key b_key = {
-            .ifindex = ifindex,
-            .flags = is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG,
-            .l4proto = l4proto,
-            .from_port = reply->dport,
-            .from_addr = reply->daddr,
-        };
-
-        struct map_binding_value *b_value =
-            bpf_map_lookup_elem(&map_binding, &b_key);
-        if (!b_value && is_icmpx(l4proto)) {
-            // TODO: always create new binding & CT for inbound ICMP query
-            // messages like pings to local NAT host, also allow refreshing
-            // CT from inbound
-        }
-        if (!b_value || __sync_fetch_and_add(&b_value->use, 0) == 0) {
-            // TODO: add to pending conntrack table if no mapping
-            // TODO: delay and send back ICMP port unreachable
-            bpf_log_debug("mapping not active");
-            return TC_ACT_SHOT;
-        }
-        if (b_value->is_static) {
-            return TC_ACT_UNSPEC;
-        }
-
-        // TODO: use initialization helper to set or initialize ever fields
-        // manually
-        struct map_ct_value ct_value_new;
-        ct_value_new.flags =
-            FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
-        ct_value_new.state = CT_IN_ONLY;
-        ct_value_new.last_seen = 0;
-        COPY_ADDR6(ct_value_new.origin.saddr.all, b_value->to_addr.all);
-        ct_value_new.origin.sport = b_value->to_port;
-        // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if reply is IPv4 and
-        // b_value->flags contains ADDR_IPV6_FLAG
-        COPY_ADDR6(ct_value_new.origin.daddr.all, reply->saddr.all);
-        ct_value_new.origin.dport = reply->sport;
-        ct_value_new._pad1 = 0;
-        ct_value_new._pad2 = 0;
-        ct_value_new.timer.__opaque[0] = 0;
-        ct_value_new.timer.__opaque[1] = 0;
-
-        ct_value = insert_new_ct(&ct_key, &ct_value_new);
-        if (!ct_value) {
-            return TC_ACT_SHOT;
-        }
-        __sync_fetch_and_add(&b_value->ref, 1);
-
-        bpf_log_debug("insert new CT");
-    } else if (!lookup_only && ct_value->state == CT_IN_ONLY) {
-        struct map_binding_key b_key = {
-            .ifindex = ifindex,
-            .flags = is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG,
-            .l4proto = l4proto,
-            .from_port = reply->dport,
-            .from_addr = reply->daddr,
-        };
-
-        struct map_binding_value *b_value =
-            bpf_map_lookup_elem(&map_binding, &b_key);
-        if (!b_value) {
-            return TC_ACT_SHOT;
-        }
-
-        if (__sync_fetch_and_add(&b_value->use, 0) != 0) {
-            bpf_log_error("refresh CT");
-            bpf_timer_start(&ct_value->timer, 30E9, 0);
-        }
-    }
-
-    *ct_value_ = ct_value;
-    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 
@@ -1340,18 +1359,44 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
-    struct map_ct_value *ct_value;
-    ret = ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
-                                   is_icmpx_error, &pkt.tuple, &ct_value);
-    if (ret != TC_ACT_OK) {
-        return ret;
+    bool do_inbound_binding =
+        ALLOW_INBOUND_ICMPX && !is_icmpx_error && is_icmpx(pkt.nexthdr);
+
+    struct map_binding_value *b_value;
+    ret = ingress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), ext_config,
+                                        pkt.nexthdr, !do_inbound_binding,
+                                        &pkt.tuple, &b_value);
+    if (ret == TC_ACT_UNSPEC) {
+        return TC_ACT_UNSPEC;
+    } else if (ret != TC_ACT_OK) {
+        // XXX: no free port, send back ICMP network unreachable
+        return TC_ACT_SHOT;
+    }
+
+    if (!b_value->is_static) {
+        // TODO: delete dangling binding(ref=0) if CT was not created
+        // successfully
+
+        if (!do_inbound_binding &&
+            __sync_fetch_and_add(&b_value->use, 0) == 0) {
+            // XXX: add to pending conntrack table if no mapping
+            // XXX: delay and send back ICMP network unreachable
+            bpf_log_debug("mapping not active");
+            return TC_ACT_SHOT;
+        }
+        struct map_ct_value *ct_value =
+            ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
+                                     is_icmpx_error, &pkt.tuple, b_value);
+        if (!ct_value) {
+            return TC_ACT_SHOT;
+        }
     }
 
     // modify dest
     ret = modify_headers(skb, IS_IPV4(&pkt), is_icmpx_error, pkt.nexthdr,
                          TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, false,
-                         &pkt.tuple.daddr, pkt.tuple.dport,
-                         &ct_value->origin.saddr, ct_value->origin.sport);
+                         &pkt.tuple.daddr, pkt.tuple.dport, &b_value->to_addr,
+                         b_value->to_port);
     if (ret) {
         bpf_log_error("failed to update csum, err:%d", ret);
         return TC_ACT_SHOT;
@@ -1433,6 +1478,18 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     if (!b_value->is_static) {
+        // TODO: delete dangling binding(ref=0) if CT was not created
+        // successfully
+
+        // TODO: This CT could be dangling and not refcounted if the binding was
+        // deleted in delete_ct() at this point, due to the deleted binding is
+        // still available here because of RCU but we might add a new CT
+        // referencing the binding(through refcount). Though the CT would fade
+        // out eventually due to timeout.
+        // We can assign a unique sequence number for binding and related CTs.
+        // And if the sequence number does not matches between binding and CT,
+        // then the CT must be dangling, so we just delete that CT and recreate
+        // a CT with new sequence number from binding.
         struct map_ct_value *ct_value = egress_lookup_or_new_ct(
             skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr, is_icmpx_error,
             &pkt.tuple, b_value, b_value_rev);

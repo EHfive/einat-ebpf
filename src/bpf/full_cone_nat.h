@@ -181,6 +181,7 @@ struct map_binding_value {
     // BINDING_ORIG_DIR_FLAG on binding key
     u32 use;
     u32 ref;
+    u32 seq;
 };
 
 struct map_ct_key {
@@ -191,18 +192,25 @@ struct map_ct_key {
     struct inet_tuple external;
 };
 
+// Adapted from NAT64 TCP state machine per RFC6146
 enum ct_state {
-    CT_IN_ONLY,
+    // CT_CLOSED,
+    CT_INIT_IN,
+    CT_INIT_OUT,
     CT_ESTABLISHED,
+    CT_TRANS,
+    CT_FIN_IN,
+    CT_FIN_OUT,
+    CT_FIN_IN_OUT,
 };
 
 struct map_ct_value {
     struct inet_tuple origin;
     u8 flags;
-    u8 _pad1;
-    u16 state;
+    u8 state;
+    u16 _pad;
     u32 last_seen;
-    u32 _pad2;
+    u32 seq;
     struct bpf_timer timer;
 };
 
