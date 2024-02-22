@@ -1212,6 +1212,20 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto,
     inet_tuple_rev_copy(&ct_key.external, reply);
 
     struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
+    if (ct_value && ct_value->seq != b_value->seq) {
+        // This CT could become dangling and not refcounted if the binding was
+        // deleted in delete_ct() at this point, due to the deleted binding is
+        // still available here because of RCU but we might add a new CT
+        // referencing the binding(through refcount). Though the CT would fade
+        // out eventually due to timeout.
+        // Thus we assign a unique sequence number for binding and related CTs
+        // to distinguish binding generations. And if the sequence number does
+        // not matches between binding and CT, then the CT must be dangling, so
+        // we just delete that CT and recreate a CT with new sequence number
+        // from binding.
+        bpf_map_delete_elem(&map_ct, &ct_key);
+        ct_value = NULL;
+    }
     if (!ct_value) {
         if (lookup_only) {
             return NULL;
@@ -1285,6 +1299,10 @@ egress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool lookup_only,
     ct_key.external.dport = origin->dport;
 
     struct map_ct_value *ct_value = bpf_map_lookup_elem(&map_ct, &ct_key);
+    if (ct_value && ct_value->seq != b_value->seq) {
+        bpf_map_delete_elem(&map_ct, &ct_key);
+        ct_value = NULL;
+    }
     if (!ct_value) {
         if (lookup_only) {
             return NULL;
@@ -1481,15 +1499,6 @@ int egress_snat(struct __sk_buff *skb) {
         // TODO: delete dangling binding(ref=0) if CT was not created
         // successfully
 
-        // TODO: This CT could be dangling and not refcounted if the binding was
-        // deleted in delete_ct() at this point, due to the deleted binding is
-        // still available here because of RCU but we might add a new CT
-        // referencing the binding(through refcount). Though the CT would fade
-        // out eventually due to timeout.
-        // We can assign a unique sequence number for binding and related CTs.
-        // And if the sequence number does not matches between binding and CT,
-        // then the CT must be dangling, so we just delete that CT and recreate
-        // a CT with new sequence number from binding.
         struct map_ct_value *ct_value = egress_lookup_or_new_ct(
             skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr, is_icmpx_error,
             &pkt.tuple, b_value, b_value_rev);
