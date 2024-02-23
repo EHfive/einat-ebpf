@@ -1448,7 +1448,7 @@ int egress_snat(struct __sk_buff *skb) {
 
     bool do_hairpin = false;
     struct dest_config *dest_config =
-        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
+        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
     if (dest_config) {
         do_hairpin = dest_hairpin(dest_config);
         if (dest_pass_nat(dest_config)) {
