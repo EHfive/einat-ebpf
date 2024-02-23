@@ -119,9 +119,15 @@ struct external_config {
     struct port_range tcp_range[MAX_PORT_RANGES];
     struct port_range udp_range[MAX_PORT_RANGES];
     struct port_range icmp_range[MAX_PORT_RANGES];
+    // icmp_in_range and icmp_out_range can overlaps but must both be
+    // included by icmp_range
+    struct port_range icmp_in_range[MAX_PORT_RANGES];
+    struct port_range icmp_out_range[MAX_PORT_RANGES];
     u8 tcp_range_len;
     u8 udp_range_len;
     u8 icmp_range_len;
+    u8 icmp_in_range_len;
+    u8 icmp_out_range_len;
 // Set to prevent creating new binding and corresponding CTs
 #define EXTERNAL_DELETING_FLAG (1 << 0)
 #define EXTERNAL_NO_SNAT_FLAG (1 << 1)
@@ -273,8 +279,10 @@ get_rev_dir_binding_key(const struct map_binding_key *key,
         key->l4proto, val, key_rev);
 }
 
+enum { RANGE_ALL, RANGE_INBOUND, RANGE_OUTBOUND } range_variant;
+
 static __always_inline u8 select_port_range(struct external_config *ext_config,
-                                            u8 l4proto,
+                                            u8 l4proto, u8 range_variant,
                                             struct port_range **proto_range) {
     switch (l4proto) {
     case IPPROTO_TCP:
@@ -285,8 +293,19 @@ static __always_inline u8 select_port_range(struct external_config *ext_config,
         return ext_config->udp_range_len;
     case IPPROTO_ICMP:
     case NEXTHDR_ICMP:
-        *proto_range = ext_config->icmp_range;
-        return ext_config->icmp_range_len;
+        switch (range_variant) {
+        case RANGE_ALL:
+            *proto_range = ext_config->icmp_range;
+            return ext_config->icmp_range_len;
+        case RANGE_INBOUND:
+            *proto_range = ext_config->icmp_in_range;
+            return ext_config->icmp_in_range_len;
+        case RANGE_OUTBOUND:
+            *proto_range = ext_config->icmp_out_range;
+            return ext_config->icmp_out_range_len;
+        default:
+            __bpf_unreachable();
+        }
     }
     return 0;
 }

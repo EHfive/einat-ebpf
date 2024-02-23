@@ -88,11 +88,24 @@ fn set_map_config(skel: &mut FullConeNatSkel, ip_addr: IpAddr) -> Result<(), Box
                 to_port: 29999,
             };
             ext_config.udp_range_len = 2;
+
             ext_config.icmp_range[0] = PortRange {
-                from_port: u16::MIN,
+                from_port: 0,
                 to_port: u16::MAX,
             };
             ext_config.icmp_range_len = 1;
+
+            ext_config.icmp_in_range[0] = PortRange {
+                from_port: 0,
+                to_port: 9999,
+            };
+            ext_config.icmp_in_range_len = 1;
+
+            ext_config.icmp_out_range[0] = PortRange {
+                from_port: 2000,
+                to_port: u16::MAX,
+            };
+            ext_config.icmp_out_range_len = 1;
 
             let dest_config = DestConfig {
                 flags: 1, // hairpin

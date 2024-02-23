@@ -12,13 +12,15 @@ const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
 // g_ipv4_external_addr, requires Linux kernel>=6.7
 const volatile u8 ENABLE_FIB_LOOKUP_SRC = false;
 
-// Allow inbound initiated binding towards local NAT host for ICMP query message
-// Vulnerability: This could cause the NAT running out of ICMP IDs if an
-// attacker is flooding ICMP packets of all ICMP IDs(0-65536) to NAT host,
+// Allow inbound initiated binding towards local NAT host for ICMP query
+// message.
+// This could cause the NAT running out of ICMP IDs if
+// an attacker is flooding ICMP packets of all ICMP IDs(0-65536) to NAT host,
 // causing internal hosts behind NAT failed to create new binding hence
-// resulting network disconnection for ICMP. A possible workaround is to add a
-// limit for maximum inbound initiated bindings allowed to reserve ICMP IDs for
-// non-local NAT usage.
+// resulting network disconnection for ICMP.
+// Thus we have introduced additional configurations of ICMP ID mapping range
+// for inbound and outbound directions respectively, so we can limit how much
+// ICMP IDs can be mapped.
 const volatile u8 ALLOW_INBOUND_ICMPX = true;
 
 // at least FRAGMENT_MIN=2s,
@@ -72,6 +74,7 @@ struct {
     __type(key, struct map_frag_track_key);
     __type(value, struct map_frag_track_value);
     __uint(max_entries, DEFAULT_FRAG_TRACK_MAX_ENTRIES);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } map_frag_track SEC(".maps");
 
@@ -98,7 +101,7 @@ struct packet_info {
     bool is_ipv4;
 #endif
     // `nexthdr` and `tuple` fields reflect embedded ICMP error IP packet in the
-    // case of ICMP error message, otherwise reflect TCP, UDP, or ICMP query
+    // case of ICMP error message, otherwise reflect TCP, UDP or ICMP query
     // message.
     u8 nexthdr;
 #define FRAG_NONE 0
@@ -498,7 +501,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         }
         case ICMP_QUERY_MSG: {
             pkt->tuple.sport = pkt->tuple.dport = get_icmpx_query_id(icmph);
-            bpf_log_debug("ICMP query, id:%d", bpf_ntohs(pkt->tuple.sport));
+            bpf_log_trace("ICMP query, id:%d", bpf_ntohs(pkt->tuple.sport));
             break;
         }
         case ICMP_ACT_UNSPEC:
@@ -654,7 +657,7 @@ nat_check_external_config(struct external_config *config) {
 static __always_inline bool nat_in_binding_range(struct external_config *config,
                                                  u8 nexthdr, u16 ext_port) {
     struct port_range *proto_range;
-    u8 range_len = select_port_range(config, nexthdr, &proto_range);
+    u8 range_len = select_port_range(config, nexthdr, RANGE_ALL, &proto_range);
     if (range_len >= 0 &&
         find_port_range_idx(ext_port, range_len, proto_range) >= 0) {
         return true;
@@ -971,7 +974,6 @@ int __always_inline lookup_src(struct __sk_buff *skb, struct packet_info *pkt) {
 
 struct find_port_ctx {
     struct map_binding_key key;
-    u16 orig_port;
     struct port_range range;
     int curr_remaining;
     u16 curr_port;
@@ -984,13 +986,11 @@ static int find_port_cb(u32 index, struct find_port_ctx *ctx) {
     struct map_binding_value *value =
         bpf_map_lookup_elem(&map_binding, &ctx->key);
     if (!value) {
-        bpf_log_debug("found free binding %d -> %d", ctx->orig_port,
-                      ctx->curr_port);
         ctx->found = true;
         return BPF_LOOP_RET_BREAK;
     }
 
-    bpf_log_trace("binding %d -> %d used", ctx->orig_port, ctx->curr_port);
+    bpf_log_trace("port %d used", ctx->curr_port);
 
     if (ctx->curr_port != ctx->range.end_port) {
         ctx->curr_port++;
@@ -1017,13 +1017,11 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx) {
         struct map_binding_value *value =
             bpf_map_lookup_elem(&map_binding, &ctx->key);
         if (!value) {
-            bpf_log_debug("found free binding %d -> %d", ctx->orig_port,
-                          ctx->curr_port);
             ctx->found = true;
             break;
         }
 
-        bpf_log_trace("binding %d -> %d used", ctx->orig_port, ctx->curr_port);
+        bpf_log_trace("port %d used", ctx->curr_port);
 
         ctx->curr_port = (bpf_get_prandom_u32() % ctx->curr_remaining) +
                          ctx->range.begin_port;
@@ -1032,12 +1030,14 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx) {
 }
 
 static int __always_inline fill_unique_binding_port(
-    struct external_config *ext_config, u8 l4proto,
+    struct external_config *ext_config, u8 l4proto, bool is_outbound,
     const struct map_binding_key *key, struct map_binding_value *val) {
 #define BPF_LOG_TOPIC "find_binding_port"
 
     struct port_range *proto_range;
-    u8 range_len = select_port_range(ext_config, l4proto, &proto_range);
+    u8 range_len = select_port_range(
+        ext_config, l4proto, is_outbound ? RANGE_OUTBOUND : RANGE_INBOUND,
+        &proto_range);
     if (range_len == 0) {
         return TC_ACT_SHOT;
     }
@@ -1048,7 +1048,6 @@ static int __always_inline fill_unique_binding_port(
     struct find_port_ctx ctx;
 
     get_rev_dir_binding_key(key, val, &ctx.key);
-    ctx.orig_port = bpf_ntohs(key->from_port);
     ctx.curr_port = bpf_ntohs(ctx.key.from_port);
     ctx.found = false;
 
@@ -1084,6 +1083,8 @@ static int __always_inline fill_unique_binding_port(
 
         if (ctx.found) {
             val->to_port = ctx.key.from_port;
+            bpf_log_debug("found free binding %d -> %d",
+                          bpf_ntohs(key->from_port), bpf_ntohs(val->to_port));
             return TC_ACT_OK;
         }
     }
@@ -1128,8 +1129,8 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
         partial_init_binding_value(is_ipv4, b_key.from_port, &b_value_new);
         COPY_ADDR6(b_value_new.to_addr.all, b_key.from_addr.all);
 
-        int ret =
-            fill_unique_binding_port(ext_config, l4proto, &b_key, &b_value_new);
+        int ret = fill_unique_binding_port(ext_config, l4proto, false, &b_key,
+                                           &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
         }
@@ -1182,8 +1183,8 @@ egress_lookup_or_new_binding(u32 ifindex, bool is_ipv4, u8 l4proto,
             return ret;
         }
 
-        ret =
-            fill_unique_binding_port(ext_config, l4proto, &b_key, &b_value_new);
+        ret = fill_unique_binding_port(ext_config, l4proto, true, &b_key,
+                                       &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
         }

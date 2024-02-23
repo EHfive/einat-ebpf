@@ -44,9 +44,13 @@ pub struct ExternalConfig {
     pub tcp_range: [PortRange; MAX_PORT_RANGES],
     pub udp_range: [PortRange; MAX_PORT_RANGES],
     pub icmp_range: [PortRange; MAX_PORT_RANGES],
+    pub icmp_in_range: [PortRange; MAX_PORT_RANGES],
+    pub icmp_out_range: [PortRange; MAX_PORT_RANGES],
     pub tcp_range_len: u8,
     pub udp_range_len: u8,
     pub icmp_range_len: u8,
+    pub icmp_in_range_len: u8,
+    pub icmp_out_range_len: u8,
     pub flags: u8,
 }
 
