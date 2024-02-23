@@ -1397,8 +1397,9 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         // TODO: delete dangling binding(ref=0) if CT was not created
         // successfully
 
-        if (!do_inbound_binding &&
-            __sync_fetch_and_add(&b_value->use, 0) == 0) {
+        bool is_local = do_inbound_binding &&
+                        ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all);
+        if (__sync_fetch_and_add(&b_value->use, 0) == 0 && !is_local) {
             // XXX: add to pending conntrack table if no mapping
             // XXX: delay and send back ICMP network unreachable
             bpf_log_debug("mapping not active");
