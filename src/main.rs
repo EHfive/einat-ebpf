@@ -6,6 +6,7 @@ mod skel;
 use std::error::Error;
 use std::net::IpAddr;
 use std::os::fd::AsFd;
+use std::time::Instant;
 
 use bytemuck::bytes_of;
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
@@ -79,6 +80,12 @@ fn set_map_config(skel: &mut FullConeNatSkel, ip_addr: IpAddr) -> Result<(), Box
             };
 
             let mut ext_config = ExternalConfig::default();
+            ext_config.tcp_range[0] = PortRange {
+                from_port: 20000,
+                to_port: 29999,
+            };
+            ext_config.tcp_range_len = 2;
+
             ext_config.udp_range[0] = PortRange {
                 from_port: 20000,
                 to_port: 23999,
@@ -165,7 +172,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     open_skel.rodata_mut().ENABLE_FIB_LOOKUP_SRC = 0;
     open_skel.rodata_mut().LOG_LEVEL = args.log_level.unwrap_or(0).min(5);
 
+    let start = Instant::now();
     let mut skel = open_skel.load()?;
+    eprintln!("eBPF programs loaded in {:?}", start.elapsed());
 
     set_map_config(&mut skel, ip_addr)?;
 

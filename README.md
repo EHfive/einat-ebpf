@@ -33,16 +33,7 @@ The interface address monitoring is not implemented yet, currently you need to s
 sudo bpf-full-cone-nat --ifname eth0 --external-ip x.x.x.x
 ```
 
-Currently only IPv4 UDP/ICMP SNAT are implemented, you would need to setup masquerading for TCP using iptables/nftables as well. And the UDP port mapping range is also hard coded to `20000-23999` and `25000-29999` for testing purpose.
-
-```nft
-table ip nat {
-  chain postrouting {
-    type nat hook postrouting priority srcnat; policy accept;
-    meta l4proto tcp oifname eth0 masquerade
-  }
-}
-```
+This application currently supports SNAT for IPv4 TCP/UDP/ICMP. And the port mapping ranges are hard-coded (`tcp:20000-29999`, `udp:20000-23999`, `udp:25000-29999`, `icmp:0-65535`) for testing purpose.
 
 Enable debug logging with `--bpf-log 4` flag and view BPF tracing logs with
 

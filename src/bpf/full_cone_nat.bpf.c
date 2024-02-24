@@ -27,8 +27,12 @@ const volatile u8 ALLOW_INBOUND_ICMPX = true;
 // https://datatracker.ietf.org/doc/html/rfc6146#section-4
 const volatile u64 TIMEOUT_FRAGMENT = 2E9;
 
-const volatile u64 TIMEOUT_PKT = 30E9;
-const volatile u64 TIMEOUT_PKT_STREAM = 300E9;
+const volatile u64 TIMEOUT_PKT_MIN = 60E9;
+const volatile u64 TIMEOUT_PKT_DEFAULT = 300E9;
+
+// https://datatracker.ietf.org/doc/html/rfc6146#section-4
+const volatile u64 TIMEOUT_TCP_TRANS = 240E9;
+const volatile u64 TIMEOUT_TCP_EST = 7440E9;
 
 u32 g_ipv4_external_addr SEC(".data") = 0;
 
@@ -99,6 +103,16 @@ struct {
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } map_ct SEC(".maps");
 
+enum {
+    PKT_CONNLESS,
+    PKT_TCP_DATA,
+    PKT_TCP_SYN,
+    PKT_TCP_RST,
+    PKT_TCP_FIN,
+};
+
+enum { FRAG_NONE, FRAG_MORE, FRAG_LAST };
+
 struct packet_info {
 #ifdef FEAT_IPV6
     bool is_ipv4;
@@ -107,9 +121,7 @@ struct packet_info {
     // case of ICMP error message, otherwise reflect TCP, UDP or ICMP query
     // message.
     u8 nexthdr;
-#define FRAG_NONE 0
-#define FRAG_MORE 1
-#define FRAG_LAST 2
+    u8 pkt_type;
     u8 frag_type;
     u16 frag_off;
     u32 frag_id;
@@ -141,6 +153,10 @@ static __always_inline int icmpx_err_l3_offset(int l4_off) {
 
 static __always_inline bool is_icmpx_error_pkt(const struct packet_info *pkt) {
     return pkt->l4_off >= 0 && pkt->err_l4_off >= 0;
+}
+
+static __always_inline bool pkt_allow_initiating_ct(u8 pkt_type) {
+    return pkt_type == PKT_CONNLESS || pkt_type == PKT_TCP_SYN;
 }
 
 static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
@@ -444,6 +460,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         return TC_ACT_SHOT;
     }
 
+    pkt->pkt_type = PKT_CONNLESS;
     pkt->err_l4_off = -1;
     if (pkt->frag_type != FRAG_NONE && pkt->frag_off != 0) {
         // not the first fragment
@@ -461,6 +478,15 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         }
         pkt->tuple.sport = tcph->source;
         pkt->tuple.dport = tcph->dest;
+        if (tcph->fin) {
+            pkt->pkt_type = PKT_TCP_FIN;
+        } else if (tcph->rst) {
+            pkt->pkt_type = PKT_TCP_RST;
+        } else if (tcph->syn) {
+            pkt->pkt_type = PKT_TCP_SYN;
+        } else {
+            pkt->pkt_type = PKT_TCP_DATA;
+        }
     } else if (pkt->nexthdr == IPPROTO_UDP) {
         struct udphdr *udph;
         if (VALIDATE_PULL(skb, &udph, pkt->l4_off, sizeof(*udph))) {
@@ -830,7 +856,8 @@ static int ct_timer_cb(void *_map_ct, struct map_ct_key *key,
 }
 
 static __always_inline struct map_ct_value *
-insert_new_ct(const struct map_ct_key *key, const struct map_ct_value *val) {
+insert_new_ct(u8 l4proto, const struct map_ct_key *key,
+              const struct map_ct_value *val) {
 #define BPF_LOG_TOPIC "insert_new_ct"
     int ret = bpf_map_update_elem(&map_ct, key, val, BPF_NOEXIST);
     if (ret) {
@@ -849,7 +876,9 @@ insert_new_ct(const struct map_ct_key *key, const struct map_ct_value *val) {
     if (ret) {
         goto delete_ct;
     }
-    ret = bpf_timer_start(&value->timer, TIMEOUT_PKT, 0);
+    ret = bpf_timer_start(
+        &value->timer,
+        l4proto == IPPROTO_TCP ? TIMEOUT_TCP_TRANS : TIMEOUT_PKT_MIN, 0);
     if (ret) {
         goto delete_ct;
     }
@@ -1267,7 +1296,7 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
     ct_value_new.timer.__opaque[0] = 0;
     ct_value_new.timer.__opaque[1] = 0;
 
-    ct_value = insert_new_ct(&ct_key, &ct_value_new);
+    ct_value = insert_new_ct(l4proto, &ct_key, &ct_value_new);
     if (!ct_value) {
         return LK_CT_ERROR_NEW;
     }
@@ -1326,7 +1355,7 @@ static __always_inline int egress_lookup_or_new_ct(
                                         .origin = *origin,
                                         .state = CT_INIT_OUT,
                                         .seq = b_value_rev->seq};
-    ct_value = insert_new_ct(&ct_key, &ct_value_new);
+    ct_value = insert_new_ct(l4proto, &ct_key, &ct_value_new);
     if (!ct_value) {
         return LK_CT_ERROR_NEW;
     }
@@ -1347,22 +1376,31 @@ static __always_inline bool ct_change_state(struct map_ct_value *ct_value,
                                         next_state);
 }
 
-static __always_inline int ct_refresh_timer(struct map_ct_value *ct_value,
-                                            u64 timeout) {
-    // XXX: delete CT if fail?
+static __always_inline int ct_reset_timer(struct map_ct_value *ct_value,
+                                          u64 timeout) {
     return bpf_timer_start(&ct_value->timer, timeout, 0);
 }
 
 static __always_inline int
-ct_state_transition(u32 ifindex, u8 l4proto, bool is_outbound,
+ct_state_transition(u32 ifindex, u8 l4proto, u8 pkt_type, bool is_outbound,
                     struct map_binding_value *b_value,
                     struct map_ct_value *ct_value) {
 #define BPF_LOG_TOPIC "ct_state_transition"
     u32 curr_state = ct_value->state;
 
+#define NEW_STATE(__state)                                                     \
+    if (!ct_change_state(ct_value, curr_state, (__state))) {                   \
+        return TC_ACT_SHOT;                                                    \
+    }
+#define RESET_TIMER(__timeout) ct_reset_timer(ct_value, (__timeout))
+
     switch (curr_state) {
     case CT_INIT_IN:
         if (is_outbound) {
+            if (pkt_type != PKT_CONNLESS && pkt_type != PKT_TCP_SYN) {
+                break;
+            }
+
             struct map_binding_key b_key_rev;
             binding_value_to_key(ifindex, 0, l4proto, b_value, &b_key_rev);
             b_value = bpf_map_lookup_elem(&map_binding, &b_key_rev);
@@ -1371,40 +1409,82 @@ ct_state_transition(u32 ifindex, u8 l4proto, bool is_outbound,
             }
             if (b_value->seq != ct_value->seq) {
                 // the CT is obsolete, schedule the deletion
-                ct_refresh_timer(ct_value, 0);
+                RESET_TIMER(0);
                 return TC_ACT_SHOT;
             }
 
-            if (!ct_change_state(ct_value, curr_state, CT_ESTABLISHED)) {
-                return TC_ACT_SHOT;
-            }
+            NEW_STATE(CT_ESTABLISHED);
             __sync_fetch_and_add(&b_value->use, 1);
-            ct_refresh_timer(ct_value, TIMEOUT_PKT_STREAM);
+            RESET_TIMER(pkt_type == PKT_CONNLESS ? TIMEOUT_PKT_DEFAULT
+                                                 : TIMEOUT_TCP_TRANS);
             bpf_log_debug("INIT_IN -> ESTABLISHED");
         } else if (b_value->use != 0) {
-            ct_refresh_timer(ct_value, TIMEOUT_PKT);
+            // XXX: or just don't refresh timer and wait recreating CT instead
+            RESET_TIMER(pkt_type == PKT_CONNLESS ? TIMEOUT_PKT_MIN
+                                                 : TIMEOUT_TCP_TRANS);
             bpf_log_trace("INIT_IN refresh timer");
         }
         break;
     case CT_INIT_OUT:
+        if (pkt_type != PKT_CONNLESS && pkt_type != PKT_TCP_SYN) {
+            break;
+        }
         if (is_outbound) {
-            ct_refresh_timer(ct_value, TIMEOUT_PKT);
+            RESET_TIMER(pkt_type == PKT_CONNLESS ? TIMEOUT_PKT_MIN
+                                                 : TIMEOUT_TCP_TRANS);
         } else {
-            if (!ct_change_state(ct_value, curr_state, CT_ESTABLISHED)) {
-                return TC_ACT_SHOT;
-            }
-            ct_refresh_timer(ct_value, TIMEOUT_PKT_STREAM);
+            NEW_STATE(CT_ESTABLISHED);
+            RESET_TIMER(pkt_type == PKT_CONNLESS ? TIMEOUT_PKT_DEFAULT
+                                                 : TIMEOUT_TCP_EST);
             bpf_log_debug("INIT_OUT -> ESTABLISHED");
         }
         break;
     case CT_ESTABLISHED:
-        if (is_outbound) {
-            ct_refresh_timer(ct_value, TIMEOUT_PKT_STREAM);
+        if (pkt_type == PKT_CONNLESS) {
+            if (is_outbound) {
+                RESET_TIMER(TIMEOUT_TCP_EST);
+            }
+        } else if (pkt_type == PKT_TCP_DATA) {
+            // XXX: should we allow refreshing from inbound?
+            RESET_TIMER(TIMEOUT_TCP_EST);
+        } else if (pkt_type == PKT_TCP_FIN) {
+            NEW_STATE(is_outbound ? CT_FIN_OUT : CT_FIN_IN);
+            bpf_log_debug("ESTABLISHED -> FIN_IN/FIN_OUT");
+        } else if (pkt_type == PKT_TCP_RST) {
+            NEW_STATE(CT_TRANS);
+            RESET_TIMER(TIMEOUT_TCP_TRANS);
+            bpf_log_debug("ESTABLISHED -> TRANS");
         }
         break;
     case CT_TRANS:
+        if (pkt_type != PKT_TCP_RST) {
+            NEW_STATE(CT_ESTABLISHED);
+            RESET_TIMER(TIMEOUT_TCP_EST);
+            bpf_log_debug("TRANS -> ESTABLISHED");
+        }
+        break;
     case CT_FIN_IN:
+        if (pkt_type == PKT_TCP_FIN) {
+            if (is_outbound) {
+                NEW_STATE(CT_FIN_IN_OUT);
+                RESET_TIMER(TIMEOUT_TCP_TRANS);
+                bpf_log_debug("FIN_IN -> FIN_IN_OUT");
+            }
+        } else {
+            RESET_TIMER(TIMEOUT_TCP_EST);
+        }
+        break;
     case CT_FIN_OUT:
+        if (pkt_type == PKT_TCP_FIN) {
+            if (!is_outbound) {
+                NEW_STATE(CT_FIN_IN_OUT);
+                RESET_TIMER(TIMEOUT_TCP_TRANS);
+                bpf_log_debug("FIN_OUT -> FIN_IN_OUT");
+            }
+        } else {
+            RESET_TIMER(TIMEOUT_TCP_EST);
+        }
+        break;
     case CT_FIN_IN_OUT:
         break;
     default:
@@ -1427,8 +1507,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) ||
-        !IS_IPV4(&pkt)) {
+    if (!IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 
@@ -1471,9 +1550,9 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     if (!b_value->is_static) {
         bool do_inbound_ct =
             !is_icmpx_error &&
-            (b_value->use != 0 ||
-             do_inbound_binding &&
-                 ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all));
+            ((b_value->use != 0 && pkt_allow_initiating_ct(pkt.pkt_type)) ||
+             (do_inbound_binding &&
+              ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all)));
 
         struct map_ct_value *ct_value;
         ret = ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
@@ -1487,8 +1566,8 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
             return TC_ACT_SHOT;
         }
         if (!is_icmpx_error && ret == LK_CT_EXIST) {
-            ct_state_transition(skb->ifindex, pkt.nexthdr, false, b_value,
-                                ct_value);
+            ct_state_transition(skb->ifindex, pkt.nexthdr, pkt.pkt_type, false,
+                                b_value, ct_value);
         }
     }
 
@@ -1519,8 +1598,7 @@ int egress_snat(struct __sk_buff *skb) {
         }
         return TC_ACT_UNSPEC;
     }
-    if (pkt.nexthdr != IPPROTO_UDP && !is_icmpx(pkt.nexthdr) ||
-        !IS_IPV4(&pkt)) {
+    if (!IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 
@@ -1569,9 +1647,11 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
+    bool do_new = !is_icmpx_error && pkt_allow_initiating_ct(pkt.pkt_type);
+
     struct map_binding_value *b_value, *b_value_rev;
     ret = egress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
-                                       !is_icmpx_error, &pkt.tuple, &b_value,
+                                       do_new, &pkt.tuple, &b_value,
                                        &b_value_rev);
     if (ret == TC_ACT_UNSPEC) {
         return TC_ACT_UNSPEC;
@@ -1583,8 +1663,8 @@ int egress_snat(struct __sk_buff *skb) {
     if (!b_value->is_static) {
         struct map_ct_value *ct_value;
         ret = egress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
-                                      !is_icmpx_error, &pkt.tuple, b_value,
-                                      b_value_rev, &ct_value);
+                                      do_new, &pkt.tuple, b_value, b_value_rev,
+                                      &ct_value);
         if (ret == LK_CT_NONE || ret == LK_CT_ERROR_NEW) {
             if (ret == LK_CT_ERROR_NEW) {
                 // TODO: delete dangling binding(ref=0) if CT was not created
@@ -1593,8 +1673,8 @@ int egress_snat(struct __sk_buff *skb) {
             return TC_ACT_SHOT;
         }
         if (!is_icmpx_error && ret == LK_CT_EXIST) {
-            ct_state_transition(skb->ifindex, pkt.nexthdr, true, b_value,
-                                ct_value);
+            ct_state_transition(skb->ifindex, pkt.nexthdr, pkt.pkt_type, true,
+                                b_value, ct_value);
         }
     }
 
