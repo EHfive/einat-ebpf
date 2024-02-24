@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "full_cone_nat.h"
 
-#define DEFAULT_FRAG_TRACK_MAX_ENTRIES 8192
+#define DEFAULT_FRAG_TRACK_MAX_ENTRIES 65536
 #define DEFAULT_BINDING_MAX_ENTRIES (65536 * 2)
 #define DEFAULT_CONNTRACK_MAX_ENTRIES (65536 * 2)
 
@@ -1438,15 +1438,16 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    if ((ret = fragment_track(skb, &pkt, 0)) != TC_ACT_OK) {
-        return ret;
-    }
-
     struct external_config *ext_config =
         lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
     if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
         return ret;
     }
+
+    if ((ret = fragment_track(skb, &pkt, 0)) != TC_ACT_OK) {
+        return ret;
+    }
+
     if (!nat_in_binding_range(ext_config, pkt.nexthdr,
                               bpf_ntohs(pkt.tuple.dport))) {
         return TC_ACT_UNSPEC;
@@ -1533,14 +1534,6 @@ int egress_snat(struct __sk_buff *skb) {
         }
     }
 
-    if ((ret = fragment_track(skb, &pkt, FRAG_TRACK_EGRESS_FLAG)) !=
-        TC_ACT_OK) {
-        if (ret == TC_ACT_UNSPEC) {
-            goto check_hairpin;
-        }
-        return ret;
-    }
-
     struct external_config *ext_config =
         lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
     if (ext_config) { // this packet was send from local NAT host
@@ -1550,6 +1543,17 @@ int egress_snat(struct __sk_buff *skb) {
         if (external_invalid(ext_config)) {
             return TC_ACT_SHOT;
         }
+    }
+
+    if ((ret = fragment_track(skb, &pkt, FRAG_TRACK_EGRESS_FLAG)) !=
+        TC_ACT_OK) {
+        if (ret == TC_ACT_UNSPEC) {
+            goto check_hairpin;
+        }
+        return TC_ACT_SHOT;
+    }
+
+    if (ext_config) {
         if (!nat_in_binding_range(ext_config, pkt.nexthdr,
                                   bpf_ntohs(pkt.tuple.sport))) {
             goto check_hairpin;
