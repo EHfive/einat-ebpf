@@ -1358,7 +1358,7 @@ ct_state_transition(u32 ifindex, u8 l4proto, bool is_outbound,
                     struct map_binding_value *b_value,
                     struct map_ct_value *ct_value) {
 #define BPF_LOG_TOPIC "ct_state_transition"
-    u32 curr_state = __sync_fetch_and_add(&ct_value->state, 0);
+    u32 curr_state = ct_value->state;
 
     switch (curr_state) {
     case CT_INIT_IN:
@@ -1381,7 +1381,7 @@ ct_state_transition(u32 ifindex, u8 l4proto, bool is_outbound,
             __sync_fetch_and_add(&b_value->use, 1);
             ct_refresh_timer(ct_value, TIMEOUT_PKT_STREAM);
             bpf_log_debug("INIT_IN -> ESTABLISHED");
-        } else if (__sync_fetch_and_add(&b_value->use, 0) != 0) {
+        } else if (b_value->use != 0) {
             ct_refresh_timer(ct_value, TIMEOUT_PKT);
             bpf_log_trace("INIT_IN refresh timer");
         }
@@ -1470,7 +1470,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     if (!b_value->is_static) {
         bool do_inbound_ct =
             !is_icmpx_error &&
-            (__sync_fetch_and_add(&b_value->use, 0) != 0 ||
+            (b_value->use != 0 ||
              do_inbound_binding &&
                  ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all));
 
