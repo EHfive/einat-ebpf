@@ -213,8 +213,8 @@ enum ct_state {
 struct map_ct_value {
     struct inet_tuple origin;
     u8 flags;
-    u8 state;
-    u16 _pad;
+    u8 _pad[3];
+    u32 state;
     u32 last_seen;
     u32 seq;
     struct bpf_timer timer;
