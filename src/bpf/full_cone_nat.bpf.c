@@ -563,6 +563,7 @@ static __always_inline int fragment_track(struct __sk_buff *skb,
     if (pkt->frag_type == FRAG_NONE ||
         pkt->frag_type == FRAG_LAST && pkt->frag_off == 0) {
         // this is an atomic packet
+        // XXX: pkt->l4_off >= 0 is always true here
         return pkt->l4_off >= 0 ? TC_ACT_OK : TC_ACT_UNSPEC;
     }
     if (is_icmpx_error_pkt(pkt)) {
@@ -1511,12 +1512,6 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         return TC_ACT_UNSPEC;
     }
 
-    struct dest_config *dest_config =
-        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
-    if (dest_config && dest_pass_nat(dest_config)) {
-        return TC_ACT_UNSPEC;
-    }
-
     struct external_config *ext_config =
         lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
     if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
@@ -1603,13 +1598,12 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     bool do_hairpin = false;
+    bool pass_nat = false;
     struct dest_config *dest_config =
         lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
     if (dest_config) {
         do_hairpin = dest_hairpin(dest_config);
-        if (dest_pass_nat(dest_config)) {
-            goto check_hairpin;
-        }
+        pass_nat = dest_pass_nat(dest_config);
     }
 
     struct external_config *ext_config =
@@ -1621,6 +1615,8 @@ int egress_snat(struct __sk_buff *skb) {
         if (external_invalid(ext_config)) {
             return TC_ACT_SHOT;
         }
+    } else if (pass_nat) {
+        goto check_hairpin;
     }
 
     if ((ret = fragment_track(skb, &pkt, FRAG_TRACK_EGRESS_FLAG)) !=
