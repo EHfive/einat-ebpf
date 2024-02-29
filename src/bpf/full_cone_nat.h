@@ -279,7 +279,7 @@ get_rev_dir_binding_key(const struct map_binding_key *key,
         key->l4proto, val, key_rev);
 }
 
-enum { RANGE_ALL, RANGE_INBOUND, RANGE_OUTBOUND } range_variant;
+enum { RANGE_ALL, RANGE_INBOUND, RANGE_OUTBOUND };
 
 static __always_inline u8 select_port_range(struct external_config *ext_config,
                                             u8 l4proto, u8 range_variant,

@@ -36,7 +36,7 @@ const volatile u64 TIMEOUT_TCP_EST = 7440E9;
 
 u32 g_ipv4_external_addr SEC(".data") = 0;
 
-u32 g_next_binding_seq SEC(".data") = 0;
+u32 g_next_binding_seq = 0;
 
 #undef BPF_LOG_LEVEL
 #undef BPF_LOG_TOPIC
