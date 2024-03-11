@@ -110,7 +110,9 @@ struct port_range {
     u16 end_port;
 };
 
-#define MAX_PORT_RANGES 4
+// Make sure it's 2-powered
+#define MAX_PORT_RANGES (1 << 2)
+#define MAX_PORT_RANGES_MASK (MAX_PORT_RANGES - 1)
 // We do random port collision test in unrolled loop on Linux kernel without
 // bpf_loop support
 #define MAX_PORT_COLLISION_TRIES 32

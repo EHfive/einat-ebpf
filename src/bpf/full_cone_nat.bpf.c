@@ -1096,7 +1096,7 @@ static int __always_inline fill_unique_binding_port(
         if (i >= range_len) {
             break;
         }
-        u32 idx = ((start_range_idx + i) % range_len) & MAX_PORT_RANGES;
+        u32 idx = ((start_range_idx + i) % range_len) & MAX_PORT_RANGES_MASK;
         ctx.range = proto_range[idx];
         ctx.curr_remaining = ctx.range.end_port - ctx.range.begin_port + 1;
         if (ctx.curr_remaining <= 0) {
