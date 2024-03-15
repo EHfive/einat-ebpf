@@ -39,6 +39,8 @@ __be32 g_ipv4_external_addr SEC(".data") = 0;
 __be32 g_ipv6_external_addr[4] SEC(".data") = {0};
 #endif
 
+u8 g_deleting_map_entires SEC(".data") = 0;
+
 u32 g_next_binding_seq = 0;
 
 #undef BPF_LOG_LEVEL
@@ -136,7 +138,7 @@ struct packet_info {
 
 #ifdef FEAT_IPV6
 #define IS_IPV4(pkt) ((pkt)->is_ipv4)
-#define FLAGS_IS_IPV4(flags) ((flags)&ADDR_IPV4_FLAG)
+#define FLAGS_IS_IPV4(flags) ((flags) & ADDR_IPV4_FLAG)
 #else
 #define IS_IPV4(pkt) (true)
 #define FLAGS_IS_IPV4(flags) (true)
@@ -551,7 +553,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
 }
 
 static int frag_timer_cb(void *_map_frag_track, struct map_frag_track_key *key,
-                         struct bpf_timer *timer) {
+                         struct map_frag_track_value *_value) {
 #define BPF_LOG_TOPIC "fragment_track"
     bpf_log_trace("fragmentation tracking timeout, deleting");
     bpf_map_delete_elem(&map_frag_track, key);
@@ -672,9 +674,6 @@ lookup_external_config(bool is_ipv4, const union u_inet_addr *external_addr) {
     }
 }
 
-static __always_inline bool external_invalid(struct external_config *config) {
-    return config->flags & EXTERNAL_DELETING_FLAG;
-}
 static __always_inline bool external_pass_nat(struct external_config *config) {
     return config->flags & EXTERNAL_NO_SNAT_FLAG;
 }
@@ -682,8 +681,6 @@ static __always_inline int
 nat_check_external_config(struct external_config *config) {
     if (!config || external_pass_nat(config))
         return TC_ACT_UNSPEC;
-    if (external_invalid(config))
-        return TC_ACT_SHOT;
     return TC_ACT_OK;
 }
 
@@ -849,8 +846,14 @@ delete_ct:
 }
 
 static int ct_timer_cb(void *_map_ct, struct map_ct_key *key,
-                       struct bpf_timer *timer) {
+                       struct map_ct_value *value) {
 #define BPF_LOG_TOPIC "ct_timer_cb"
+    if (g_deleting_map_entires) {
+        // delay the CT deletion till g_deleting_map_entires became false
+        bpf_timer_start(&value->timer, 1e9, 0);
+        return 0;
+    }
+
     bpf_log_debug("timeout: delete CT %pI4 -> %pI4", &key->external.saddr.ip,
                   &key->external.daddr.ip);
 
@@ -1531,8 +1534,8 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
-    bool do_inbound_binding =
-        ALLOW_INBOUND_ICMPX && !is_icmpx_error && is_icmpx(pkt.nexthdr);
+    bool do_inbound_binding = ALLOW_INBOUND_ICMPX && !g_deleting_map_entires &&
+                              !is_icmpx_error && is_icmpx(pkt.nexthdr);
 
     struct map_binding_value *b_value;
     ret = ingress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), ext_config,
@@ -1547,7 +1550,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 
     if (!b_value->is_static) {
         bool do_inbound_ct =
-            !is_icmpx_error &&
+            !g_deleting_map_entires && !is_icmpx_error &&
             ((b_value->use != 0 && pkt_allow_initiating_ct(pkt.pkt_type)) ||
              (do_inbound_binding &&
               ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all)));
@@ -1615,9 +1618,6 @@ int egress_snat(struct __sk_buff *skb) {
         if (external_pass_nat(ext_config)) {
             goto check_hairpin;
         }
-        if (external_invalid(ext_config)) {
-            return TC_ACT_SHOT;
-        }
     } else if (pass_nat) {
         goto check_hairpin;
     }
@@ -1646,7 +1646,8 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
-    bool do_new = !is_icmpx_error && pkt_allow_initiating_ct(pkt.pkt_type);
+    bool do_new = !g_deleting_map_entires && !is_icmpx_error &&
+                  pkt_allow_initiating_ct(pkt.pkt_type);
 
     struct map_binding_value *b_value, *b_value_rev;
     ret = egress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,

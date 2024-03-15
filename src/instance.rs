@@ -389,11 +389,9 @@ trait RuntimeConfig {
     }
 
     fn apply(&self, old: Option<&Self>, skel: &mut FullConeNatSkel) -> Result<()> {
-        let maps = skel.maps();
-        let map_dest_config = Self::skel_map_dest_config(&maps);
-        let map_ext_config = Self::skel_map_external_config(&maps);
-
-        let handle_dest_change = |change| -> Result<()> {
+        let handle_dest_change = |skel: &mut FullConeNatSkel, change| -> Result<()> {
+            let maps = skel.maps();
+            let map_dest_config = Self::skel_map_dest_config(&maps);
             match change {
                 MapChange::Insert(k, v) | MapChange::Update(k, v) => {
                     eprintln!("insert/update dest {:?}", k);
@@ -409,30 +407,48 @@ trait RuntimeConfig {
             Ok(())
         };
 
-        let handle_external_change = |change| -> Result<()> {
+        let handle_external_change = |skel: &mut FullConeNatSkel, change| -> Result<()> {
             match change {
                 MapChange::Insert(k, v) => {
                     eprintln!("insert external {:?}", k);
+
+                    let maps = skel.maps();
+                    let map_ext_config = Self::skel_map_external_config(&maps);
                     Self::with_lpm_key_bytes(*k, |k| {
                         map_ext_config.update(k, bytemuck::bytes_of(v), MapFlags::NO_EXIST)
                     })?;
                 }
                 MapChange::Update(k, v) => {
                     eprintln!("update external {:?}", k);
-                    Self::with_lpm_key_bytes(*k, |k| {
-                        let mut deleting: BpfExternalConfig = *v;
-                        deleting.flags.insert(ExternalFlags::DELETING);
-                        map_ext_config.update(k, bytemuck::bytes_of(&deleting), MapFlags::EXIST)
-                    })?;
-                    // TODO: delete related obsolete NAT bindings and conntracks as binding port ranges have changed
-                    Self::with_lpm_key_bytes(*k, |k| {
-                        map_ext_config.update(k, bytemuck::bytes_of(v), MapFlags::EXIST)
+
+                    with_skel_deleting(skel, |skel| -> Result<()> {
+                        remove_binding_and_ct_entires(
+                            skel,
+                            Self::ip_addr_from_addr(Self::addr_from_prefix(*k)),
+                        )?;
+
+                        let maps = skel.maps();
+                        let map_ext_config = Self::skel_map_external_config(&maps);
+                        Self::with_lpm_key_bytes(*k, |k| {
+                            map_ext_config.update(k, bytemuck::bytes_of(v), MapFlags::EXIST)
+                        })?;
+
+                        Ok(())
                     })?;
                 }
                 MapChange::Delete(k) => {
                     eprintln!("delete external {:?}", k);
-                    Self::with_lpm_key_bytes(*k, |k| map_ext_config.delete(k))?;
-                    // TODO: delete all related NAT bindings and conntracks
+
+                    with_skel_deleting(skel, |skel| -> Result<()> {
+                        let maps = skel.maps();
+                        let map_ext_config = Self::skel_map_external_config(&maps);
+                        Self::with_lpm_key_bytes(*k, |k| map_ext_config.delete(k))?;
+
+                        remove_binding_and_ct_entires(
+                            skel,
+                            Self::ip_addr_from_addr(Self::addr_from_prefix(*k)),
+                        )
+                    })?;
                 }
             }
             Ok(())
@@ -443,10 +459,10 @@ trait RuntimeConfig {
             let external_config_diff =
                 PrefixMapDiff::new(old.external_config(), self.external_config());
             for change in dest_config_diff {
-                handle_dest_change(change)?;
+                handle_dest_change(skel, change)?;
             }
             for change in external_config_diff {
-                handle_external_change(change)?;
+                handle_external_change(skel, change)?;
             }
             if old.external_addr() != self.external_addr() {
                 self.apply_external_addr(skel);
@@ -457,7 +473,7 @@ trait RuntimeConfig {
                 .iter()
                 .map(|(k, v)| MapChange::Insert(k, v))
             {
-                handle_dest_change(change)?;
+                handle_dest_change(skel, change)?;
             }
 
             for change in self
@@ -465,7 +481,7 @@ trait RuntimeConfig {
                 .iter()
                 .map(|(k, v)| MapChange::Insert(k, v))
             {
-                handle_external_change(change)?;
+                handle_external_change(skel, change)?;
             }
 
             self.apply_external_addr(skel);
@@ -861,6 +877,79 @@ impl Drop for Instance {
     fn drop(&mut self) {
         let _ = self.detach();
     }
+}
+
+fn with_skel_deleting<T, F: FnOnce(&mut FullConeNatSkel) -> T>(
+    skel: &mut FullConeNatSkel,
+    f: F,
+) -> T {
+    skel.data_mut().g_deleting_map_entires = 1;
+
+    // Wait for 1ms and expecting all previous BPF program calls
+    // that had not seen g_deleting_map_entires=1 have finished,
+    // so binding map and CT map become stable.
+    std::thread::sleep(std::time::Duration::from_millis(1));
+
+    let res = f(skel);
+
+    skel.data_mut().g_deleting_map_entires = 0;
+
+    res
+}
+
+fn remove_binding_and_ct_entires(skel: &FullConeNatSkel, external_addr: IpAddr) -> Result<()> {
+    use skel::{BindingFlags, InetAddr, MapBindingKey, MapBindingValue, MapCtKey};
+
+    let maps = skel.maps();
+    let map_binding = maps.map_binding();
+    let map_ct = maps.map_ct();
+
+    let addr_flag = if external_addr.is_ipv4() {
+        BindingFlags::ADDR_IPV4
+    } else {
+        BindingFlags::ADDR_IPV6
+    };
+    let external_addr: InetAddr = external_addr.into();
+
+    let mut to_delete_binding_keys = Vec::new();
+    for binding_key_raw in map_binding.keys() {
+        let binding_key: &MapBindingKey = bytemuck::from_bytes(&binding_key_raw);
+        if binding_key.flags.contains(BindingFlags::ORIG_DIR) {
+            if let Some(binding_value_raw) = map_binding.lookup(&binding_key_raw, MapFlags::ANY)? {
+                let binding_value: &MapBindingValue = bytemuck::from_bytes(&binding_value_raw);
+                if binding_value.flags.contains(addr_flag) && binding_value.to_addr == external_addr
+                {
+                    to_delete_binding_keys.extend(binding_key_raw);
+                }
+            }
+        } else if binding_key.flags.contains(addr_flag) && binding_key.from_addr == external_addr {
+            to_delete_binding_keys.extend(binding_key_raw);
+        }
+    }
+
+    map_binding.delete_batch(
+        &to_delete_binding_keys,
+        (to_delete_binding_keys.len() / core::mem::size_of::<MapBindingKey>()) as _,
+        MapFlags::ANY,
+        MapFlags::ANY,
+    )?;
+
+    let mut to_delete_ct_keys = Vec::new();
+    for ct_key_raw in map_ct.keys() {
+        let ct_key: &MapCtKey = bytemuck::from_bytes(&ct_key_raw);
+        if ct_key.flags.contains(addr_flag) && ct_key.external.src_addr == external_addr {
+            to_delete_ct_keys.extend(ct_key_raw);
+        }
+    }
+
+    map_ct.delete_batch(
+        &to_delete_ct_keys,
+        (to_delete_ct_keys.len() / core::mem::size_of::<MapCtKey>()) as _,
+        MapFlags::ANY,
+        MapFlags::ANY,
+    )?;
+
+    Ok(())
 }
 
 #[cfg(test)]

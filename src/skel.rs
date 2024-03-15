@@ -2,16 +2,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 include!(concat!(env!("OUT_DIR"), "/full_cone_nat.skel.rs"));
 
+#[cfg(feature = "ipv6")]
+use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv4Addr};
+
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
 use ipnet::Ipv4Net;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
 
-#[cfg(feature = "ipv6")]
-type InetAddr = [u8; 16];
-#[cfg(not(feature = "ipv6"))]
-type InetAddr = [u8; 4];
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
+#[repr(transparent)]
+pub struct InetAddr {
+    #[cfg(feature = "ipv6")]
+    pub inner: [u8; 16],
+    #[cfg(not(feature = "ipv6"))]
+    pub inner: [u8; 4],
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
 #[repr(C, align(4))]
@@ -50,7 +58,6 @@ bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
     #[repr(transparent)]
     pub struct ExternalFlags: u8 {
-        const DELETING = 0b01;
         const NO_SNAT = 0b10;
     }
 }
@@ -130,6 +137,45 @@ pub struct MapCtKey {
     pub l4proto: u8,
     pub _pad: u16,
     pub external: InetTuple,
+}
+
+impl From<Ipv4Addr> for InetAddr {
+    #[cfg(feature = "ipv6")]
+    fn from(value: Ipv4Addr) -> Self {
+        let mut res = Self::default();
+        let octets = value.octets();
+        res.inner[..octets.len()].copy_from_slice(&octets);
+        res
+    }
+    #[cfg(not(feature = "ipv6"))]
+    fn from(value: Ipv4Addr) -> Self {
+        Self {
+            inner: value.octets(),
+        }
+    }
+}
+
+#[cfg(feature = "ipv6")]
+impl From<Ipv6Addr> for InetAddr {
+    fn from(value: Ipv6Addr) -> Self {
+        Self {
+            inner: value.octets(),
+        }
+    }
+}
+
+impl From<IpAddr> for InetAddr {
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V4(v4) => v4.into(),
+            #[cfg(feature = "ipv6")]
+            IpAddr::V6(v6) => v6.into(),
+            #[cfg(not(feature = "ipv6"))]
+            IpAddr::V6(_) => {
+                panic!("unexpected")
+            }
+        }
+    }
 }
 
 impl From<Ipv4Net> for Ipv4LpmKey {
