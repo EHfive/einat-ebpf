@@ -1,0 +1,60 @@
+[defaults]
+tcp_ranges = ["20000-29999"]
+udp_ranges = ["20000-29999"]
+icmp_ranges = ["0-65535"]
+icmp_in_ranges = ["0-9999"]
+icmp_out_ranges = ["1000-65535"]
+
+[[interfaces]]
+# Interface name would be resolved to iterface index
+if_name = "eth0"
+# `if_index` would be prefered if both `if_name` and `if_index` are specified
+if_index = 2
+nat44 = true
+nat66 = false
+# View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
+# 0: disable, 1: error, 2: warn, 3: info, 4: debug, 5: trace
+bpf_log_level = 0
+bpf_fib_lookup_external = false
+# Set this to `false` for early disabling inbound ICMP binding initiation,
+# similar to set `icmp_in_ranges = []`.
+allow_inbound_icmpx = true
+# See allowed time units in <https://github.com/fundu-rs/fundu/blob/fundu-v2.0.0/README.md#time-units>
+timeout_fragment = "2s"
+timeout_pkt_min = "1m"
+timeout_pkt_default = "5m"
+timeout_tcp_trans = "4m"
+timeout_tcp_est = "124m"
+
+no_snat_dests = [
+    # "192.168.0.0/16"
+]
+hairpin_dests = []
+
+# This adds default external config with `match_address = "0.0.0.0/0`
+# or `match_address = "::/0` to match all IP addresses on iterface.
+default_externals = true
+
+# The first static or matching address would be used as NAT external address.
+[[interfaces.externals]]
+address = "192.168.4.2"
+no_snat = false
+no_hairpin = false
+# Defaults to ranges in [defaults] if not secified.
+#tcp_ranges = ["10000-65535"]
+#udp_ranges = ["10000-65535"]
+#icmp_ranges = ["0-65535"]
+#icmp_in_ranges = ["0-9999"]
+#icmp_out_ranges = ["1000-65535"]
+
+# You can set ranges to empty `[]` to disable NAT for respective protocol,
+# e.g. disable NAT for TCP.
+#tcp_ranges = []
+
+[[interfaces.externals]]
+match_address = "192.168.4.0/24"
+
+# Minimal interface confiuration
+[[interfaces]]
+if_name = "eth0"
+nat44 = true

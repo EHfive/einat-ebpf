@@ -34,7 +34,10 @@ const volatile u64 TIMEOUT_PKT_DEFAULT = 300E9;
 const volatile u64 TIMEOUT_TCP_TRANS = 240E9;
 const volatile u64 TIMEOUT_TCP_EST = 7440E9;
 
-u32 g_ipv4_external_addr SEC(".data") = 0;
+__be32 g_ipv4_external_addr SEC(".data") = 0;
+#ifdef FEAT_IPV6
+__be32 g_ipv6_external_addr[4] SEC(".data") = {0};
+#endif
 
 u32 g_next_binding_seq = 0;
 

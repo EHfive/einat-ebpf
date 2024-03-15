@@ -1,4 +1,4 @@
-> [!CAUTION]
+> [!WARNING]
 > This application is currently under heavy development, do not use in production.
 
 # eBPF Full Cone NAT
@@ -27,18 +27,12 @@ nix build github:EHfive/bpf-full-cone-nat
 
 ## Usage
 
-The interface address monitoring is not implemented yet, currently you need to specify IP address of the interface statically with `--external-ip` flag.
+This application currently supports SNAT for IPv4 TCP/UDP/ICMP, see [config.sample.toml](./config.sample.toml) for more configuration options.
 
 ```shell
-sudo bpf-full-cone-nat --ifname eth0 --external-ip x.x.x.x
-```
-
-This application currently supports SNAT for IPv4 TCP/UDP/ICMP. And the port mapping ranges are hard-coded (`tcp:20000-29999`, `udp:20000-23999`, `udp:25000-29999`, `icmp:0-65535`) for testing purpose.
-
-Enable debug logging with `--bpf-log 4` flag and view BPF tracing logs with
-
-```shell
-cat /sys/kernel/debug/tracing/trace_pipe
+sudo bpf-full-cone-nat --config /path/to/config.toml
+# or with simplified CLI options
+sudo bpf-full-cone-nat --ifname eth0
 ```
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
@@ -53,7 +47,9 @@ To test if this works, you can use tools below on internal network behind NAT. N
 -   [netfilter-full-cone-nat](https://github.com/Chion82/netfilter-full-cone-nat)
 -   [nft-fullcone](https://github.com/fullcone-nat-nftables)
 
-Instead of relying on existing Netfilter conntrack system like these programs did, we implement a fully functional Endpoint Independent NAT engine on eBPF TC hook from scratch thus avoiding hassles dealing with "Address and Port-Dependent" Netfilter conntrack system and being slim and efficient.
+Instead of relying on existing Netfilter conntrack system like these out-of-tree kernel modules did, we implement a fully functional Endpoint Independent NAT engine on eBPF TC hook from scratch thus avoiding hassles dealing with "Address and Port-Dependent" Netfilter conntrack system and being slim and efficient.
+
+And our application enjoys libbpf's CO-RE(Compile Once – Run Everywhere) capabilities that hugely simplifies distribution and deployment.
 
 ## Recommended Reading
 
