@@ -1146,6 +1146,32 @@ partial_init_binding_value(bool is_ipv4, __be16 to_port,
     val->seq = __sync_fetch_and_add(&g_next_binding_seq, 1);
 }
 
+static __always_inline void delete_binding(struct map_binding_key *b_key,
+                                           struct map_binding_value *b_value) {
+
+    struct map_binding_key key_rev;
+    get_rev_dir_binding_key(b_key, b_value, &key_rev);
+
+    bpf_map_delete_elem(&map_binding, &b_key);
+    bpf_map_delete_elem(&map_binding, &key_rev);
+}
+
+static __always_inline void
+ingress_delete_binding(u32 ifindex, bool is_ipv4, u8 l4proto,
+                       const struct inet_tuple *reply,
+                       struct map_binding_value *b_value) {
+
+    struct map_binding_key b_key = {
+        .ifindex = ifindex,
+        .flags = (is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG),
+        .l4proto = l4proto,
+        .from_port = reply->dport,
+        .from_addr = reply->daddr,
+    };
+
+    delete_binding(&b_key, b_value);
+}
+
 static __always_inline int
 ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
                               struct external_config *ext_config, u8 l4proto,
@@ -1183,6 +1209,22 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
 
     *b_value_ = b_value;
     return TC_ACT_OK;
+}
+
+static __always_inline void
+egress_delete_binding(u32 ifindex, bool is_ipv4, u8 l4proto,
+                      const struct inet_tuple *origin,
+                      struct map_binding_value *b_value) {
+    struct map_binding_key b_key = {
+        .ifindex = ifindex,
+        .flags =
+            BINDING_ORIG_DIR_FLAG | (is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG),
+        .l4proto = l4proto,
+        .from_port = origin->sport,
+        .from_addr = origin->saddr,
+    };
+
+    delete_binding(&b_key, b_value);
 }
 
 static __always_inline int
@@ -1560,9 +1602,11 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
                                        do_inbound_ct, &pkt.tuple, b_value,
                                        &ct_value);
         if (ret == LK_CT_NONE || ret == LK_CT_ERROR_NEW) {
-            if (ret == LK_CT_ERROR_NEW) {
-                // TODO: delete dangling binding(ref=0) if CT was not created
-                // successfully
+            if (ret == LK_CT_ERROR_NEW && b_value->ref == 0) {
+                // XXX: use binding timer instead?
+                // delete dangling binding
+                egress_delete_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
+                                      &pkt.tuple, b_value);
             }
             return TC_ACT_SHOT;
         }
@@ -1666,9 +1710,10 @@ int egress_snat(struct __sk_buff *skb) {
                                       do_new, &pkt.tuple, b_value, b_value_rev,
                                       &ct_value);
         if (ret == LK_CT_NONE || ret == LK_CT_ERROR_NEW) {
-            if (ret == LK_CT_ERROR_NEW) {
-                // TODO: delete dangling binding(ref=0) if CT was not created
-                // successfully
+            if (ret == LK_CT_ERROR_NEW && b_value->ref == 0) {
+                // delete dangling binding
+                egress_delete_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
+                                      &pkt.tuple, b_value);
             }
             return TC_ACT_SHOT;
         }
@@ -1699,12 +1744,12 @@ check_hairpin:
         return TC_ACT_SHOT;
     }
     // somehow "%pM" does not work in BPF
-    bpf_log_trace("hairpin smac: %x:%x:%x:%x:%x:%x", eth->h_source[0], eth->h_source[1],
-                  eth->h_source[2], eth->h_source[3], eth->h_source[4],
-                  eth->h_source[5]);
-    bpf_log_trace("hairpin dmac: %x:%x:%x:%x:%x:%x", eth->h_dest[0], eth->h_dest[1],
-                  eth->h_dest[2], eth->h_dest[3], eth->h_dest[4],
-                  eth->h_dest[5]);
+    bpf_log_trace("hairpin smac: %x:%x:%x:%x:%x:%x", eth->h_source[0],
+                  eth->h_source[1], eth->h_source[2], eth->h_source[3],
+                  eth->h_source[4], eth->h_source[5]);
+    bpf_log_trace("hairpin dmac: %x:%x:%x:%x:%x:%x", eth->h_dest[0],
+                  eth->h_dest[1], eth->h_dest[2], eth->h_dest[3],
+                  eth->h_dest[4], eth->h_dest[5]);
 
     u8 smac[6];
     __builtin_memcpy(smac, eth->h_source, sizeof(smac));
