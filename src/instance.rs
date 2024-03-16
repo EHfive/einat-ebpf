@@ -353,15 +353,13 @@ trait RuntimeConfig {
             }
 
             for network in matches {
-                let dest_value = self.dest_config_mut().entry(network).or_default();
-                dest_value
-                    .flags
-                    .set(DestFlags::HAIRPIN, !external.no_hairpin);
-
                 let ext_value = self.external_config_mut().entry(network).or_default();
                 ext_value
                     .flags
                     .set(ExternalFlags::NO_SNAT, external.no_snat);
+                if external.no_snat {
+                    continue;
+                }
 
                 external
                     .tcp_ranges
@@ -380,6 +378,11 @@ trait RuntimeConfig {
                     &mut ext_value.icmp_out_range,
                     &mut ext_value.icmp_out_range_len,
                 );
+
+                let dest_value = self.dest_config_mut().entry(network).or_default();
+                dest_value
+                    .flags
+                    .set(DestFlags::HAIRPIN, !external.no_hairpin);
             }
         }
 

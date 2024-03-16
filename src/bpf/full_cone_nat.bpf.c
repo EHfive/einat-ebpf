@@ -1689,10 +1689,29 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
 check_hairpin:
-    if (do_hairpin) {
-        // TODO: redirect to ingress
+    if (!do_hairpin) {
+        return TC_ACT_UNSPEC;
     }
-    return TC_ACT_UNSPEC;
+
+    void *data_end = ctx_data_end(skb);
+    struct ethhdr *eth = ctx_data(skb);
+    if ((void *)(eth + 1) > data_end) {
+        return TC_ACT_SHOT;
+    }
+    // somehow "%pM" does not work in BPF
+    bpf_log_trace("hairpin smac: %x:%x:%x:%x:%x:%x", eth->h_source[0], eth->h_source[1],
+                  eth->h_source[2], eth->h_source[3], eth->h_source[4],
+                  eth->h_source[5]);
+    bpf_log_trace("hairpin dmac: %x:%x:%x:%x:%x:%x", eth->h_dest[0], eth->h_dest[1],
+                  eth->h_dest[2], eth->h_dest[3], eth->h_dest[4],
+                  eth->h_dest[5]);
+
+    u8 smac[6];
+    __builtin_memcpy(smac, eth->h_source, sizeof(smac));
+    __builtin_memcpy(eth->h_source, eth->h_dest, sizeof(smac));
+    __builtin_memcpy(eth->h_dest, smac, sizeof(smac));
+
+    return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 #undef BPF_LOG_TOPIC
 }
 
