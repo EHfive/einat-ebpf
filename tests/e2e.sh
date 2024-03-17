@@ -41,15 +41,6 @@ ip netns exec router ip link set br-lan up
 ip netns exec router ip link set veth_r_d1 up
 ip netns exec router ip link set veth_r_d2 up
 
-# router: setup nftables masquerade SNAT
-ip netns exec router nft --file - <<EOF
-    table inet nat {
-        chain postrouting {
-            type nat hook postrouting priority srcnat; policy accept;
-            iifname br-lan oifname {veth_r_s1, veth_r_s2} masquerade
-        }
-    }
-EOF
 
 ip netns exec router sysctl net.ipv4.ip_forward=1
 
@@ -66,6 +57,11 @@ ip netns exec device2 ip route add default via 192.168.1.1 dev veth_d2_r
 ip netns exec router ip link show
 ip netns exec router ip addr show
 ip netns exec router ip route show
+
+# start our program
+ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s1 --bpf-log 5 >/dev/null 2>&1 &
+ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s2 >/dev/null 2>&1 &
+sleep 1
 
 #
 # test network connectivity
@@ -85,33 +81,25 @@ ip netns exec device1 ping -c1 10.0.2.1
 ip netns exec device2 ping -c1 10.0.1.1
 ip netns exec device2 ping -c1 10.0.2.1
 
-ip netns exec router conntrack -F
-
-# start our program
-ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s1 --bpf-log 5 >/dev/null 2>&1 &
-ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s2 >/dev/null 2>&1 &
-sleep 1
 
 # Create unreplied conntracks in router.
 # If we add one of these beforehands, the created conntrack would block connection from server's 3479 to device's 29999
-#ip netns exec server1 nc -uq0 -s 10.0.1.1 -p 3479 10.0.1.100 29999 <<<"test"
-#ip netns exec server1 nc -uq0 -s 10.0.1.2 -p 3479 10.0.1.100 29999 <<<"test"
-#ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.1 3479 <<<"test"
-#ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.2 3479 <<<"test"
-#ip netns exec device2 nc -uq0 -p 29999 10.0.1.1 3479 <<<"test"
-#ip netns exec device1 nc -uq0 -p 29999 10.0.1.1 3479 <<<"test"
-#ip netns exec device2 nc -uq0 -p 29999 10.0.1.2 3479 <<<"test"
+ip netns exec server1 nc -uq0 -s 10.0.1.1 -p 3479 10.0.1.100 29999 <<<"test"
+ip netns exec server1 nc -uq0 -s 10.0.1.2 -p 3479 10.0.1.100 29999 <<<"test"
+ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.1 3479 <<<"test"
+ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.2 3479 <<<"test"
+ip netns exec device2 nc -uq0 -p 29999 10.0.1.1 3479 <<<"test"
+ip netns exec device1 nc -uq0 -p 29999 10.0.1.1 3479 <<<"test"
+ip netns exec device2 nc -uq0 -p 29999 10.0.1.2 3479 <<<"test"
 
 # start stunserver in servers
 ip netns exec server1 stunserver --mode full --primaryinterface 10.0.1.1 --altinterface 10.0.1.2 &
 ip netns exec server2 stunserver --mode full --primaryinterface 10.0.2.1 --altinterface 10.0.2.2 &
 sleep 1
 
-ip netns exec router conntrack -L
 
 # STUN NAT behavior test with out program
 ip netns exec device1 stunclient --mode full --localport 29999 10.0.1.1
-ip netns exec router conntrack -L
 
 ip netns exec device1 stunclient --mode full --localport 29999 10.0.1.1 | grep -z "Endpoint Independent Mapping.*Endpoint Independent Filtering"
 ip netns exec device2 stunclient --mode full --localport 29999 10.0.1.1 | grep -z "Endpoint Independent Mapping.*Endpoint Independent Filtering"
