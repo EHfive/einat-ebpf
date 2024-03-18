@@ -994,26 +994,6 @@ modify_headers(struct __sk_buff *skb, bool is_ipv4, bool is_icmpx_error,
     return 0;
 }
 
-int __always_inline lookup_src(struct __sk_buff *skb, struct packet_info *pkt) {
-#define BPF_LOG_TOPIC "lookup_src"
-    struct bpf_fib_lookup params = {
-        .family = AF_INET,
-        .ifindex = skb->ifindex,
-    };
-
-    params.ifindex = skb->ifindex;
-    params.ipv4_src = pkt->tuple.saddr.ip;
-    params.ipv4_dst = pkt->tuple.daddr.ip;
-    int ret = bpf_fib_lookup(skb, &params, sizeof(params),
-                             BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_OUTPUT);
-    bpf_log_debug("out, ret:%d, src:%pI4 orig_dst:%pI4 dst:%pI4 if:%d", ret,
-                  &params.ipv4_src, &pkt->tuple.daddr.ip, &params.ipv4_dst,
-                  params.ifindex);
-
-    return 0;
-#undef BPF_LOG_TOPIC
-}
-
 struct find_port_ctx {
     struct map_binding_key key;
     struct port_range range;
@@ -1183,13 +1163,67 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
     return TC_ACT_OK;
 }
 
+int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
+                                          const union u_inet_addr *saddr,
+                                          const union u_inet_addr *daddr,
+                                          union u_inet_addr *to_addr) {
+#define BPF_LOG_TOPIC "egress_fib_lookup_src"
+    struct bpf_fib_lookup params = {
+        .family = is_ipv4 ? AF_INET : AF_INET6,
+        .ifindex = skb->ifindex,
+    };
+
+    if (is_ipv4) {
+        params.ipv4_src = saddr->ip;
+        params.ipv4_dst = daddr->ip;
+    } else {
+#ifdef FEAT_IPV6
+        COPY_ADDR6(params.ipv6_src, saddr->ip6);
+        COPY_ADDR6(params.ipv6_dst, daddr->ip6);
+#else
+        __bpf_unreachable();
+#endif
+    }
+    int ret = bpf_fib_lookup(skb, &params, sizeof(params),
+                             BPF_FIB_LOOKUP_OUTPUT | BPF_FIB_LOOKUP_SKIP_NEIGH |
+                                 BPF_FIB_LOOKUP_SRC);
+    if (ret) {
+        // The lookup would return -EINVAL if BPF_FIB_LOOKUP_SRC is not
+        // supported on current kernel, we then can fallback to use defined
+        // external address
+        if (ret > 0) {
+            bpf_log_error("FIB lookup failed, ret: %d", ret);
+        }
+        return TC_ACT_SHOT;
+    }
+
+    if (is_ipv4) {
+        inet_addr_set_ip(to_addr, params.ipv4_src);
+    } else {
+#ifdef FEAT_IPV6
+        inet_addr_set_ip6(to_addr, params.ipv6_src);
+#else
+        __bpf_unreachable();
+#endif
+    }
+
+    if (is_ipv4) {
+        bpf_log_debug("orig_src:%pI4, orig_dst:%pI4, src:%pI4, dst:%pI4",
+                      &saddr->ip, &daddr->ip, &params.ipv4_src,
+                      &params.ipv4_dst);
+    }
+
+    return TC_ACT_OK;
+#undef BPF_LOG_TOPIC
+}
+
 static __always_inline int
-egress_lookup_or_new_binding(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
-                             const struct inet_tuple *origin,
+egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
+                             bool do_new, const struct inet_tuple *origin,
                              struct map_binding_value **b_value_,
                              struct map_binding_value **b_value_rev_) {
     struct map_binding_key b_key = {
-        .ifindex = ifindex,
+        .ifindex = skb->ifindex,
         .flags =
             BINDING_ORIG_DIR_FLAG | (is_ipv4 ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG),
         .l4proto = l4proto,
@@ -1204,14 +1238,25 @@ egress_lookup_or_new_binding(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
         if (!do_new) {
             return TC_ACT_SHOT;
         }
-        // XXX: do NAT64 if origin->daddr has NAT64 prefix
+
+        // XXX: do NAT64 for origin->daddr if it has NAT64 prefix
         bool nat_x_4 = is_ipv4;
         struct map_binding_value b_value_new;
         partial_init_binding_value(nat_x_4, b_key.from_port, &b_value_new);
-        if (nat_x_4) {
-            inet_addr_set_ip(&b_value_new.to_addr, g_ipv4_external_addr);
-        } else {
-            // TODO: handle IPv6
+
+        // XXX: use 0 as source address in the case of NAT64
+        if (!ENABLE_FIB_LOOKUP_SRC ||
+            egress_fib_lookup_src(skb, nat_x_4, &origin->saddr, &origin->daddr,
+                                  &b_value_new.to_addr)) {
+            if (nat_x_4) {
+                inet_addr_set_ip(&b_value_new.to_addr, g_ipv4_external_addr);
+            } else {
+#ifdef FEAT_IPV6
+                inet_addr_set_ip6(&b_value_new.to_addr, g_ipv6_external_addr);
+#else
+                __bpf_unreachable();
+#endif
+            }
         }
 
         int ret;
@@ -1644,9 +1689,8 @@ int egress_snat(struct __sk_buff *skb) {
                   pkt_allow_initiating_ct(pkt.pkt_type);
 
     struct map_binding_value *b_value, *b_value_rev;
-    ret = egress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
-                                       do_new, &pkt.tuple, &b_value,
-                                       &b_value_rev);
+    ret = egress_lookup_or_new_binding(skb, IS_IPV4(&pkt), pkt.nexthdr, do_new,
+                                       &pkt.tuple, &b_value, &b_value_rev);
     if (ret == TC_ACT_UNSPEC) {
         return TC_ACT_UNSPEC;
     } else if (ret != TC_ACT_OK) {
