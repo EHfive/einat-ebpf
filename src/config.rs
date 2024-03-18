@@ -138,8 +138,6 @@ pub struct ConfigNetIf {
     #[serde(default)]
     pub no_snat_dests: Vec<IpNet>,
     #[serde(default)]
-    pub hairpin_dests: Vec<IpNet>,
-    #[serde(default)]
     pub externals: Vec<ConfigExternal>,
 }
 

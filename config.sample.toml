@@ -29,7 +29,6 @@ timeout_tcp_est = "124m"
 no_snat_dests = [
     # "192.168.0.0/16"
 ]
-hairpin_dests = []
 
 # This adds default external config with `match_address = "0.0.0.0/0`
 # or `match_address = "::/0` to match all IP addresses on iterface.

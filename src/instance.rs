@@ -70,11 +70,8 @@ struct External {
 pub struct InstanceConfig {
     if_index: u32,
     v4_no_snat_dests: Vec<Ipv4Net>,
-    v4_hairpin_dests: Vec<Ipv4Net>,
     #[cfg(feature = "ipv6")]
     v6_no_snat_dests: Vec<Ipv6Net>,
-    #[cfg(feature = "ipv6")]
-    v6_hairpin_dests: Vec<Ipv6Net>,
     externals: Vec<External>,
     const_config: ConstConfig,
     runtime_v4_config: RuntimeV4Config,
@@ -305,7 +302,6 @@ trait RuntimeConfig {
     fn init(
         &mut self,
         no_snat_dests: &[Self::Prefix],
-        hairpin_dests: &[Self::Prefix],
         externals: &[External],
         addresses: &[Self::Addr],
     ) {
@@ -314,10 +310,6 @@ trait RuntimeConfig {
         for network in no_snat_dests {
             let dest_value = self.dest_config_mut().entry(*network).or_default();
             dest_value.flags.insert(DestFlags::NO_SNAT);
-        }
-        for network in hairpin_dests {
-            let dest_value = self.dest_config_mut().entry(*network).or_default();
-            dest_value.flags.insert(DestFlags::HAIRPIN);
         }
 
         let mut addresses_set =
@@ -353,10 +345,16 @@ trait RuntimeConfig {
             }
 
             for network in matches {
+                let dest_value = self.dest_config_mut().entry(network).or_default();
+                dest_value
+                    .flags
+                    .set(DestFlags::HAIRPIN, !external.no_hairpin);
+
                 let ext_value = self.external_config_mut().entry(network).or_default();
                 ext_value
                     .flags
                     .set(ExternalFlags::NO_SNAT, external.no_snat);
+
                 if external.no_snat {
                     continue;
                 }
@@ -378,11 +376,6 @@ trait RuntimeConfig {
                     &mut ext_value.icmp_out_range,
                     &mut ext_value.icmp_out_range_len,
                 );
-
-                let dest_value = self.dest_config_mut().entry(network).or_default();
-                dest_value
-                    .flags
-                    .set(DestFlags::HAIRPIN, !external.no_hairpin);
             }
         }
 
@@ -624,48 +617,26 @@ impl RuntimeConfig for RuntimeV6Config {
 }
 
 impl RuntimeV4Config {
-    fn from(
-        no_snat_dests: &[Ipv4Net],
-        hairpin_dests: &[Ipv4Net],
-        externals: &[External],
-        addresses: &[Ipv4Addr],
-    ) -> Self {
+    fn from(no_snat_dests: &[Ipv4Net], externals: &[External], addresses: &[Ipv4Addr]) -> Self {
         let mut this = Self {
             external_addr: Ipv4Addr::UNSPECIFIED,
             dest_config: Default::default(),
             external_config: Default::default(),
         };
-        Self::init(
-            &mut this,
-            no_snat_dests,
-            hairpin_dests,
-            externals,
-            addresses,
-        );
+        Self::init(&mut this, no_snat_dests, externals, addresses);
         this
     }
 }
 
 #[cfg(feature = "ipv6")]
 impl RuntimeV6Config {
-    fn from(
-        no_snat_dests: &[Ipv6Net],
-        hairpin_dests: &[Ipv6Net],
-        externals: &[External],
-        addresses: &[Ipv6Addr],
-    ) -> Self {
+    fn from(no_snat_dests: &[Ipv6Net], externals: &[External], addresses: &[Ipv6Addr]) -> Self {
         let mut this = Self {
             external_addr: Ipv6Addr::UNSPECIFIED,
             dest_config: Default::default(),
             external_config: Default::default(),
         };
-        Self::init(
-            &mut this,
-            no_snat_dests,
-            hairpin_dests,
-            externals,
-            addresses,
-        );
+        Self::init(&mut this, no_snat_dests, externals, addresses);
         this
     }
 }
@@ -718,18 +689,9 @@ impl InstanceConfig {
             .iter()
             .filter_map(unwrap_v4)
             .collect::<Vec<_>>();
-        let v4_hairpin_dests = if_config
-            .hairpin_dests
-            .iter()
-            .filter_map(unwrap_v4)
-            .collect::<Vec<_>>();
 
-        let runtime_v4_config = RuntimeV4Config::from(
-            &v4_no_snat_dests,
-            &v4_hairpin_dests,
-            &externals,
-            &addresses.ipv4,
-        );
+        let runtime_v4_config =
+            RuntimeV4Config::from(&v4_no_snat_dests, &externals, &addresses.ipv4);
 
         #[cfg(feature = "ipv6")]
         fn unwrap_v6(network: &IpNet) -> Option<Ipv6Net> {
@@ -747,27 +709,14 @@ impl InstanceConfig {
             .filter_map(unwrap_v6)
             .collect::<Vec<_>>();
         #[cfg(feature = "ipv6")]
-        let v6_hairpin_dests = if_config
-            .hairpin_dests
-            .iter()
-            .filter_map(unwrap_v6)
-            .collect::<Vec<_>>();
-        #[cfg(feature = "ipv6")]
-        let runtime_v6_config = RuntimeV6Config::from(
-            &v6_no_snat_dests,
-            &v6_hairpin_dests,
-            &externals,
-            &addresses.ipv6,
-        );
+        let runtime_v6_config =
+            RuntimeV6Config::from(&v6_no_snat_dests, &externals, &addresses.ipv6);
 
         Ok(Self {
             if_index,
             v4_no_snat_dests,
-            v4_hairpin_dests,
             #[cfg(feature = "ipv6")]
             v6_no_snat_dests,
-            #[cfg(feature = "ipv6")]
-            v6_hairpin_dests,
             externals,
             const_config,
             runtime_v4_config,
@@ -811,7 +760,6 @@ impl InstanceConfig {
 impl Instance {
     pub fn reconfigure_v4_addresses(&mut self, addresses: &[Ipv4Addr]) -> Result<()> {
         let new = RuntimeV4Config::from(
-            &self.config.v4_hairpin_dests,
             &self.config.v4_no_snat_dests,
             &self.config.externals,
             addresses,
@@ -826,7 +774,6 @@ impl Instance {
     #[cfg(feature = "ipv6")]
     pub fn reconfigure_v6_addresses(&mut self, addresses: &[Ipv6Addr]) -> Result<()> {
         let new = RuntimeV6Config::from(
-            &self.config.v6_hairpin_dests,
             &self.config.v6_no_snat_dests,
             &self.config.externals,
             addresses,
