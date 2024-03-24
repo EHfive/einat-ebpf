@@ -356,6 +356,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             .handle()
             .route()
             .add()
+            .replace()
             .table_id(self.table_id)
             .output_interface(self.external_if_index);
 
