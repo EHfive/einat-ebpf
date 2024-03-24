@@ -114,7 +114,7 @@ impl IpNetwork for Ipv4Net {
 #[cfg(feature = "ipv6")]
 impl IpNetwork for Ipv6Net {
     type Addr = Ipv6Addr;
-    const LEN: u8 = 32;
+    const LEN: u8 = 128;
 
     fn prefix_len(&self) -> u8 {
         Ipv6Net::prefix_len(self)
