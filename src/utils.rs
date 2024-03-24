@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Model for configuration variables and maps of our eBPF application
 use std::iter::Iterator;
-use std::net::Ipv4Addr;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use ipnet::Ipv4Net;
 #[cfg(feature = "ipv6")]
@@ -67,16 +67,7 @@ where
     }
 }
 
-pub fn ipv4_addr_to_net(address: Ipv4Addr) -> Ipv4Net {
-    Ipv4Net::new(address, 32).unwrap()
-}
-
-#[cfg(feature = "ipv6")]
-pub fn ipv6_addr_to_net(address: Ipv6Addr) -> Ipv6Net {
-    Ipv6Net::new(address, 128).unwrap()
-}
-
-pub trait IpNetwork {
+pub trait IpNetwork: Sized {
     type Addr;
     const LEN: u8;
 
@@ -84,7 +75,11 @@ pub trait IpNetwork {
 
     fn addr(&self) -> Self::Addr;
 
+    fn ip_addr(&self) -> IpAddr;
+
     fn from_addr(addr: Self::Addr) -> Self;
+
+    fn from_ip_addr(addr: IpAddr) -> Option<Self>;
 }
 
 impl IpNetwork for Ipv4Net {
@@ -92,15 +87,27 @@ impl IpNetwork for Ipv4Net {
     const LEN: u8 = 32;
 
     fn prefix_len(&self) -> u8 {
-        self.prefix_len()
+        Ipv4Net::prefix_len(self)
     }
 
     fn addr(&self) -> Self::Addr {
-        self.addr()
+        Ipv4Net::addr(self)
+    }
+
+    fn ip_addr(&self) -> IpAddr {
+        IpAddr::V4(self.addr())
     }
 
     fn from_addr(addr: Self::Addr) -> Self {
         Ipv4Net::new(addr, Self::LEN).unwrap()
+    }
+
+    fn from_ip_addr(addr: IpAddr) -> Option<Self> {
+        if let IpAddr::V4(v4) = addr {
+            Some(Self::from_addr(v4))
+        } else {
+            None
+        }
     }
 }
 
@@ -110,15 +117,27 @@ impl IpNetwork for Ipv6Net {
     const LEN: u8 = 32;
 
     fn prefix_len(&self) -> u8 {
-        self.prefix_len()
+        Ipv6Net::prefix_len(self)
     }
 
     fn addr(&self) -> Self::Addr {
-        self.addr()
+        Ipv6Net::addr(self)
+    }
+
+    fn ip_addr(&self) -> IpAddr {
+        IpAddr::V6(self.addr())
     }
 
     fn from_addr(addr: Self::Addr) -> Self {
         Ipv6Net::new(addr, Self::LEN).unwrap()
+    }
+
+    fn from_ip_addr(addr: IpAddr) -> Option<Self> {
+        if let IpAddr::V6(v6) = addr {
+            Some(Self::from_addr(v6))
+        } else {
+            None
+        }
     }
 }
 

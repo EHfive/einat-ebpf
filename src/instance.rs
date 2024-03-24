@@ -23,7 +23,7 @@ use crate::skel::{
     DestConfig as BpfDestConfig, DestFlags, ExternalConfig as BpfExternalConfig, ExternalFlags,
     FullConeNatMaps, FullConeNatSkel, FullConeNatSkelBuilder, OpenFullConeNatSkel,
 };
-use crate::utils::{self, MapChange, PrefixMapDiff};
+use crate::utils::{IpNetwork, MapChange, PrefixMapDiff};
 
 #[derive(Debug, Default)]
 struct ConstConfig {
@@ -38,7 +38,7 @@ struct ConstConfig {
 }
 #[derive(Debug)]
 struct RuntimeV4Config {
-    external_addr: Ipv4Addr,
+    external_addr: Ipv4Net,
     dest_config: PrefixMap<Ipv4Net, BpfDestConfig>,
     external_config: PrefixMap<Ipv4Net, BpfExternalConfig>,
 }
@@ -46,7 +46,7 @@ struct RuntimeV4Config {
 #[cfg(feature = "ipv6")]
 #[derive(Debug)]
 struct RuntimeV6Config {
-    external_addr: Ipv6Addr,
+    external_addr: Ipv6Net,
     dest_config: PrefixMap<Ipv6Net, BpfDestConfig>,
     external_config: PrefixMap<Ipv6Net, BpfExternalConfig>,
 }
@@ -276,22 +276,16 @@ impl External {
 }
 
 trait RuntimeConfig {
-    type Addr: Copy + PartialEq;
-    type Prefix: Copy + Prefix + PartialEq + Debug;
+    type Prefix: IpNetwork + Copy + Prefix + PartialEq + Debug;
 
-    fn external_addr(&self) -> &Self::Addr;
-    fn external_addr_mut(&mut self) -> &mut Self::Addr;
+    fn external_addr(&self) -> &Self::Prefix;
+    fn external_addr_mut(&mut self) -> &mut Self::Prefix;
 
     fn dest_config(&self) -> &PrefixMap<Self::Prefix, BpfDestConfig>;
     fn dest_config_mut(&mut self) -> &mut PrefixMap<Self::Prefix, BpfDestConfig>;
 
     fn external_config(&self) -> &PrefixMap<Self::Prefix, BpfExternalConfig>;
     fn external_config_mut(&mut self) -> &mut PrefixMap<Self::Prefix, BpfExternalConfig>;
-
-    fn prefix_from_addr(addr: Self::Addr) -> Self::Prefix;
-    fn addr_from_prefix(prefix: Self::Prefix) -> Self::Addr;
-    fn addr_from_ip_addr(ip_addr: IpAddr) -> Option<Self::Addr>;
-    fn ip_addr_from_addr(addr: Self::Addr) -> IpAddr;
 
     fn with_lpm_key_bytes<R, F: FnOnce(&[u8]) -> R>(prefix: Self::Prefix, f: F) -> R;
 
@@ -303,31 +297,28 @@ trait RuntimeConfig {
         &mut self,
         no_snat_dests: &[Self::Prefix],
         externals: &[External],
-        addresses: &[Self::Addr],
+        addresses: &[Self::Prefix],
     ) {
-        let mut external_addr: Option<Self::Addr> = None;
+        let mut external_addr: Option<Self::Prefix> = None;
 
         for network in no_snat_dests {
             let dest_value = self.dest_config_mut().entry(*network).or_default();
             dest_value.flags.insert(DestFlags::NO_SNAT);
         }
 
-        let mut addresses_set =
-            PrefixSet::from_iter(addresses.iter().copied().map(Self::prefix_from_addr));
+        let mut addresses_set = PrefixSet::from_iter(addresses.iter().copied());
 
         for external in externals {
             let mut matches = Vec::new();
             match external.address {
                 AddressOrMatcher::Static { address } => {
-                    if let Some(address) = Self::addr_from_ip_addr(address) {
-                        matches.push(Self::prefix_from_addr(address));
+                    if let Some(address) = Self::Prefix::from_ip_addr(address) {
+                        matches.push(address);
                     }
                 }
                 AddressOrMatcher::Matcher { match_address } => {
                     for address in addresses_set.iter() {
-                        if match_address
-                            .contains(&Self::ip_addr_from_addr(Self::addr_from_prefix(*address)))
-                        {
+                        if match_address.contains(&address.ip_addr()) {
                             matches.push(*address);
                         }
                     }
@@ -340,7 +331,7 @@ trait RuntimeConfig {
 
             if external_addr.is_none() && !external.no_snat {
                 if let Some(first) = matches.first() {
-                    external_addr = Some(Self::addr_from_prefix(*first));
+                    external_addr = Some(*first);
                 }
             }
 
@@ -398,12 +389,12 @@ trait RuntimeConfig {
             })
             .collect();
 
-        let external = Self::prefix_from_addr(*self.external_addr());
+        let external = self.external_addr();
         // move external address to first
         res.sort_by(|a, b| {
-            if a == &external {
+            if a == external {
                 Ordering::Less
-            } else if b == &external {
+            } else if b == external {
                 Ordering::Greater
             } else {
                 Ordering::Equal
@@ -447,10 +438,7 @@ trait RuntimeConfig {
                     eprintln!("update external {:?}", k);
 
                     with_skel_deleting(skel, |skel| -> Result<()> {
-                        remove_binding_and_ct_entires(
-                            skel,
-                            Self::ip_addr_from_addr(Self::addr_from_prefix(*k)),
-                        )?;
+                        remove_binding_and_ct_entires(skel, k.ip_addr())?;
 
                         let maps = skel.maps();
                         let map_ext_config = Self::skel_map_external_config(&maps);
@@ -469,10 +457,7 @@ trait RuntimeConfig {
                         let map_ext_config = Self::skel_map_external_config(&maps);
                         Self::with_lpm_key_bytes(*k, |k| map_ext_config.delete(k))?;
 
-                        remove_binding_and_ct_entires(
-                            skel,
-                            Self::ip_addr_from_addr(Self::addr_from_prefix(*k)),
-                        )
+                        remove_binding_and_ct_entires(skel, k.ip_addr())
                     })?;
                 }
             }
@@ -517,13 +502,12 @@ trait RuntimeConfig {
 }
 
 impl RuntimeConfig for RuntimeV4Config {
-    type Addr = Ipv4Addr;
     type Prefix = Ipv4Net;
 
-    fn external_addr(&self) -> &Self::Addr {
+    fn external_addr(&self) -> &Self::Prefix {
         &self.external_addr
     }
-    fn external_addr_mut(&mut self) -> &mut Self::Addr {
+    fn external_addr_mut(&mut self) -> &mut Self::Prefix {
         &mut self.external_addr
     }
 
@@ -541,26 +525,6 @@ impl RuntimeConfig for RuntimeV4Config {
         &mut self.external_config
     }
 
-    fn prefix_from_addr(addr: Self::Addr) -> Self::Prefix {
-        utils::ipv4_addr_to_net(addr)
-    }
-
-    fn addr_from_prefix(prefix: Self::Prefix) -> Self::Addr {
-        prefix.addr()
-    }
-
-    fn addr_from_ip_addr(ip_addr: IpAddr) -> Option<Self::Addr> {
-        if let IpAddr::V4(addr) = ip_addr {
-            Some(addr)
-        } else {
-            None
-        }
-    }
-
-    fn ip_addr_from_addr(addr: Self::Addr) -> IpAddr {
-        IpAddr::V4(addr)
-    }
-
     fn with_lpm_key_bytes<R, F: FnOnce(&[u8]) -> R>(prefix: Self::Prefix, f: F) -> R {
         let key: skel::Ipv4LpmKey = prefix.into();
         f(bytemuck::bytes_of(&key))
@@ -568,7 +532,7 @@ impl RuntimeConfig for RuntimeV4Config {
 
     fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
         eprintln!("setting external address {:?}", self.external_addr);
-        skel.data_mut().g_ipv4_external_addr = bytemuck::cast(self.external_addr.octets());
+        skel.data_mut().g_ipv4_external_addr = bytemuck::cast(self.external_addr.addr().octets());
     }
 
     fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
@@ -582,13 +546,12 @@ impl RuntimeConfig for RuntimeV4Config {
 
 #[cfg(feature = "ipv6")]
 impl RuntimeConfig for RuntimeV6Config {
-    type Addr = Ipv6Addr;
     type Prefix = Ipv6Net;
 
-    fn external_addr(&self) -> &Self::Addr {
+    fn external_addr(&self) -> &Self::Prefix {
         &self.external_addr
     }
-    fn external_addr_mut(&mut self) -> &mut Self::Addr {
+    fn external_addr_mut(&mut self) -> &mut Self::Prefix {
         &mut self.external_addr
     }
 
@@ -606,26 +569,6 @@ impl RuntimeConfig for RuntimeV6Config {
         &mut self.external_config
     }
 
-    fn prefix_from_addr(addr: Self::Addr) -> Self::Prefix {
-        utils::ipv6_addr_to_net(addr)
-    }
-
-    fn addr_from_prefix(prefix: Self::Prefix) -> Self::Addr {
-        prefix.addr()
-    }
-
-    fn addr_from_ip_addr(ip_addr: IpAddr) -> Option<Self::Addr> {
-        if let IpAddr::V6(addr) = ip_addr {
-            Some(addr)
-        } else {
-            None
-        }
-    }
-
-    fn ip_addr_from_addr(addr: Self::Addr) -> IpAddr {
-        IpAddr::V6(addr)
-    }
-
     fn with_lpm_key_bytes<R, F: FnOnce(&[u8]) -> R>(prefix: Self::Prefix, f: F) -> R {
         let key: skel::Ipv6LpmKey = prefix.into();
         f(bytemuck::bytes_of(&key))
@@ -633,7 +576,7 @@ impl RuntimeConfig for RuntimeV6Config {
 
     fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
         eprintln!("setting external address {:?}", self.external_addr);
-        skel.data_mut().g_ipv6_external_addr = bytemuck::cast(self.external_addr.octets());
+        skel.data_mut().g_ipv6_external_addr = bytemuck::cast(self.external_addr.addr().octets());
     }
 
     fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
@@ -648,11 +591,15 @@ impl RuntimeConfig for RuntimeV6Config {
 impl RuntimeV4Config {
     fn from(no_snat_dests: &[Ipv4Net], externals: &[External], addresses: &[Ipv4Addr]) -> Self {
         let mut this = Self {
-            external_addr: Ipv4Addr::UNSPECIFIED,
+            external_addr: Ipv4Net::from_addr(Ipv4Addr::UNSPECIFIED),
             dest_config: Default::default(),
             external_config: Default::default(),
         };
-        Self::init(&mut this, no_snat_dests, externals, addresses);
+        let addresses: Vec<_> = addresses
+            .iter()
+            .map(|&addr| Ipv4Net::from_addr(addr))
+            .collect();
+        Self::init(&mut this, no_snat_dests, externals, &addresses);
         this
     }
 }
@@ -661,11 +608,15 @@ impl RuntimeV4Config {
 impl RuntimeV6Config {
     fn from(no_snat_dests: &[Ipv6Net], externals: &[External], addresses: &[Ipv6Addr]) -> Self {
         let mut this = Self {
-            external_addr: Ipv6Addr::UNSPECIFIED,
+            external_addr: Ipv6Net::from_addr(Ipv6Addr::UNSPECIFIED),
             dest_config: Default::default(),
             external_config: Default::default(),
         };
-        Self::init(&mut this, no_snat_dests, externals, addresses);
+        let addresses: Vec<_> = addresses
+            .iter()
+            .map(|&addr| Ipv6Net::from_addr(addr))
+            .collect();
+        Self::init(&mut this, no_snat_dests, externals, &addresses);
         this
     }
 }
