@@ -70,7 +70,11 @@ no_hairpin = false
 [[interfaces.externals]]
 match_address = "192.168.4.0/24"
 
-# Minimal interface confiuration
+# Minimal interface confiuration with hairpin routing
 [[interfaces]]
 if_name = "eth0"
 nat44 = true
+
+ipv4_hairpin_route.internal_if_names = [
+    "lo", "internal"
+]
