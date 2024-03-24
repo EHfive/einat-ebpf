@@ -156,10 +156,7 @@ impl RouteHelper {
 
         // Add protocol=kernel to prevent it from being deleted by systemd-networkd
         // in case `ManageForeignRoutingPolicyRules` was not disabled.
-        add_local_rule
-            .message_mut()
-            .attributes
-            .push(RuleAttribute::Protocol(RouteProtocol::Kernel));
+        rule_set_protocol_kernel(add_local_rule.message_mut());
 
         if let Err(e) = add_local_rule.execute().await {
             if !route_err_is_exist(&e) {
@@ -403,6 +400,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         req.message_mut()
             .attributes
             .push(RuleAttribute::IpProtocol(ip_protocol));
+        rule_set_protocol_kernel(req.message_mut());
 
         let rule = req.message_mut().clone();
 
@@ -557,6 +555,11 @@ fn route_err_is_exist(e: &rtnetlink::Error) -> bool {
         }
     }
     false
+}
+
+fn rule_set_protocol_kernel(rule: &mut RuleMessage) {
+    rule.attributes
+        .push(RuleAttribute::Protocol(RouteProtocol::Kernel));
 }
 
 fn route_destination<N: RouteIpNetwork>(route: &RouteMessage) -> Option<N> {
