@@ -76,6 +76,52 @@ pub fn ipv6_addr_to_net(address: Ipv6Addr) -> Ipv6Net {
     Ipv6Net::new(address, 128).unwrap()
 }
 
+pub trait IpNetwork {
+    type Addr;
+    const LEN: u8;
+
+    fn prefix_len(&self) -> u8;
+
+    fn addr(&self) -> Self::Addr;
+
+    fn from_addr(addr: Self::Addr) -> Self;
+}
+
+impl IpNetwork for Ipv4Net {
+    type Addr = Ipv4Addr;
+    const LEN: u8 = 32;
+
+    fn prefix_len(&self) -> u8 {
+        self.prefix_len()
+    }
+
+    fn addr(&self) -> Self::Addr {
+        self.addr()
+    }
+
+    fn from_addr(addr: Self::Addr) -> Self {
+        Ipv4Net::new(addr, Self::LEN).unwrap()
+    }
+}
+
+#[cfg(feature = "ipv6")]
+impl IpNetwork for Ipv6Net {
+    type Addr = Ipv6Addr;
+    const LEN: u8 = 32;
+
+    fn prefix_len(&self) -> u8 {
+        self.prefix_len()
+    }
+
+    fn addr(&self) -> Self::Addr {
+        self.addr()
+    }
+
+    fn from_addr(addr: Self::Addr) -> Self {
+        Ipv6Net::new(addr, Self::LEN).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

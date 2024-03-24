@@ -17,7 +17,7 @@ use libbpf_rs::{MapFlags, TcHook, TcHookBuilder, TC_EGRESS, TC_INGRESS};
 use prefix_trie::{Prefix, PrefixMap, PrefixSet};
 
 use crate::config::{AddressOrMatcher, ConfigDefaults, ConfigExternal, ConfigNetIf, ProtoRange};
-use crate::monitor::IfAddresses;
+use crate::route::IfAddresses;
 use crate::skel;
 use crate::skel::{
     DestConfig as BpfDestConfig, DestFlags, ExternalConfig as BpfExternalConfig, ExternalFlags,
@@ -277,7 +277,7 @@ impl External {
 
 trait RuntimeConfig {
     type Addr: Copy + PartialEq;
-    type Prefix: Copy + Prefix + Debug;
+    type Prefix: Copy + Prefix + PartialEq + Debug;
 
     fn external_addr(&self) -> &Self::Addr;
     fn external_addr_mut(&mut self) -> &mut Self::Addr;
@@ -382,6 +382,35 @@ trait RuntimeConfig {
         if let Some(external_addr) = external_addr {
             *self.external_addr_mut() = external_addr;
         }
+    }
+
+    fn hairpin_dests(&self) -> Vec<Self::Prefix> {
+        use core::cmp::Ordering;
+        let mut res: Vec<_> = self
+            .dest_config()
+            .iter()
+            .filter_map(|(prefix, config)| {
+                if config.flags.contains(DestFlags::HAIRPIN) {
+                    Some(*prefix)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let external = Self::prefix_from_addr(*self.external_addr());
+        // move external address to first
+        res.sort_by(|a, b| {
+            if a == &external {
+                Ordering::Less
+            } else if b == &external {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        });
+
+        res
     }
 
     fn apply(&self, old: Option<&Self>, skel: &mut FullConeNatSkel) -> Result<()> {
@@ -785,6 +814,15 @@ impl Instance {
         Ok(())
     }
 
+    pub fn v4_hairpin_dests(&self) -> Vec<Ipv4Net> {
+        self.config.runtime_v4_config.hairpin_dests()
+    }
+
+    #[cfg(feature = "ipv6")]
+    pub fn v6_hairpin_dests(&self) -> Vec<Ipv6Net> {
+        self.config.runtime_v6_config.hairpin_dests()
+    }
+
     fn ingress_tc_hook(&self) -> TcHook {
         let progs = self.skel.progs();
         TcHookBuilder::new(progs.ingress_rev_snat().as_fd())
@@ -820,12 +858,6 @@ impl Instance {
         }
 
         Ok(())
-    }
-}
-
-impl Drop for Instance {
-    fn drop(&mut self) {
-        let _ = self.detach();
     }
 }
 

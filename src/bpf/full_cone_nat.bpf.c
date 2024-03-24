@@ -1692,7 +1692,7 @@ int egress_snat(struct __sk_buff *skb) {
     ret = egress_lookup_or_new_binding(skb, IS_IPV4(&pkt), pkt.nexthdr, do_new,
                                        &pkt.tuple, &b_value, &b_value_rev);
     if (ret == TC_ACT_UNSPEC) {
-        return TC_ACT_UNSPEC;
+        goto check_hairpin;
     } else if (ret != TC_ACT_OK) {
         // XXX: no free port, send back ICMP network unreachable
         return TC_ACT_SHOT;

@@ -34,6 +34,23 @@ no_snat_dests = [
 # or `match_address = "::/0` to match all IP addresses on iterface.
 default_externals = true
 
+# Automatically configure hairpin routes
+[interfaces.ipv4_hairpin_route]
+# Enable the hairpin routing configuraion, defaults to true if
+# `internal_if_names` is not empty, otherwise defualts to false.
+enable = false
+internal_if_names = [
+    # "lo",
+    # "internal"
+]
+ip_protocols = ["tcp", "udp"]
+table_id = 3000
+
+[interfaces.ipv6_hairpin_route]
+internal_if_names = []
+ip_protocols = ["tcp", "udp"]
+table_id = 3000
+
 # The first static or matching address would be used as NAT external address.
 [[interfaces.externals]]
 address = "192.168.4.2"

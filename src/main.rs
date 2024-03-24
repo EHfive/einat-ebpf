@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod config;
 mod instance;
-mod monitor;
+mod route;
 mod skel;
 mod utils;
 
@@ -11,10 +11,15 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use futures_util::StreamExt;
+use ipnet::Ipv4Net;
+#[cfg(feature = "ipv6")]
+use ipnet::Ipv6Net;
+use tokio::signal::unix::{signal, SignalKind};
+use tokio::task::JoinHandle;
 
 use config::{Config, ConfigNetIf, NetIfId};
 use instance::Instance;
-use monitor::{IfAddresses, MonitorEvent};
+use route::{HairpinRouting, IfAddresses, MonitorEvent, RouteHelper};
 
 const HELP: &str = "\
 BPF Full Cone NAT
@@ -77,43 +82,76 @@ fn parse_env_args() -> Result<Args> {
 }
 
 struct IfContext {
+    config_idx: usize,
     if_index: u32,
     inst: Instance,
     addresses: IfAddresses,
+    rt_helper: RouteHelper,
+    v4_hairpin_routing: Option<HairpinRouting<Ipv4Net>>,
+    #[cfg(feature = "ipv6")]
+    v6_hairpin_routing: Option<HairpinRouting<Ipv6Net>>,
 }
 
-async fn daemon(config: &Config) -> Result<()> {
-    let (monitor_task, query_addr, events) = monitor::spawn()?;
+impl IfContext {
+    async fn detach(&mut self) -> Result<()> {
+        let mut results: Vec<Result<()>> = Vec::new();
+        results.push(self.inst.detach());
+
+        if let Some(mut hairpin_routing) = self.v4_hairpin_routing.take() {
+            results.push(hairpin_routing.deconfigure().await);
+        }
+
+        #[cfg(feature = "ipv6")]
+        if let Some(mut hairpin_routing) = self.v6_hairpin_routing.take() {
+            results.push(hairpin_routing.deconfigure().await);
+        }
+
+        for res in results {
+            res?;
+        }
+        Ok(())
+    }
+}
+
+const DEFAULT_HAIRPIN_TABLE_ID: u32 = 3000;
+
+async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Result<JoinHandle<()>> {
+    let (monitor_task, rt_helper, events) = route::spawn_monitor()?;
 
     let mut inst_configs = HashMap::with_capacity(config.interfaces.len());
 
-    for if_config in &config.interfaces {
+    for (config_idx, if_config) in config.interfaces.iter().enumerate() {
         let if_index = if_config.interface.resolve_index()?;
-        let addresses = query_addr.query_all_addresses(if_index).await?;
+        let addresses = rt_helper.query_all_addresses(if_index).await?;
         let inst_config =
             instance::InstanceConfig::try_from(if_index, if_config, &config.defaults, &addresses)?;
-        inst_configs.insert(if_index, (inst_config, addresses));
+        inst_configs.insert(if_index, (config_idx, inst_config, addresses));
     }
 
     let need_monitor = inst_configs
         .values()
-        .any(|(inst_config, _)| !inst_config.is_static());
+        .any(|(_, inst_config, _)| !inst_config.is_static());
 
     let tasks: Vec<_> = inst_configs
         .into_iter()
-        .map(|(if_index, (inst_config, addresses))| {
+        .map(|(if_index, (config_idx, inst_config, addresses))| {
+            let rt_helper = rt_helper.clone();
             tokio::task::spawn_blocking(move || -> Result<_> {
                 let inst = inst_config.load()?;
                 Ok(IfContext {
+                    config_idx,
                     if_index,
                     inst,
                     addresses,
+                    rt_helper,
+                    v4_hairpin_routing: Default::default(),
+                    #[cfg(feature = "ipv6")]
+                    v6_hairpin_routing: Default::default(),
                 })
             })
         })
         .collect();
 
-    let mut contexts = HashMap::with_capacity(tasks.len());
     for task in tasks {
         let ctx = task.await??;
         contexts.insert(ctx.if_index, ctx);
@@ -121,7 +159,61 @@ async fn daemon(config: &Config) -> Result<()> {
 
     for ctx in contexts.values_mut() {
         ctx.inst.attach()?;
+
+        let hairpin_config = &config.interfaces[ctx.config_idx].ipv4_hairpin_route;
+        let internal_if_names = hairpin_config.internal_if_names.clone();
+        let enable = hairpin_config.enable == Some(true)
+            || hairpin_config.enable != Some(false) && !internal_if_names.is_empty();
+        if enable {
+            let table_id = hairpin_config
+                .table_id
+                .map(|num| num.get())
+                .unwrap_or(DEFAULT_HAIRPIN_TABLE_ID);
+            let mut hairpin_routing =
+                HairpinRouting::new(rt_helper.clone(), ctx.if_index, table_id);
+
+            let res = hairpin_routing
+                .configure(
+                    internal_if_names,
+                    hairpin_config.ip_protocols.clone(),
+                    ctx.inst.v4_hairpin_dests(),
+                )
+                .await;
+            match res {
+                Ok(()) => ctx.v4_hairpin_routing = Some(hairpin_routing),
+                Err(e) => eprintln!("failed to configure IPv4 hairpin routing: {:?}", e),
+            }
+        }
+
+        #[cfg(feature = "ipv6")]
+        {
+            let hairpin_config = &config.interfaces[ctx.config_idx].ipv6_hairpin_route;
+            let internal_if_names = hairpin_config.internal_if_names.clone();
+            let enable = hairpin_config.enable == Some(true)
+                || hairpin_config.enable != Some(false) && !internal_if_names.is_empty();
+            if enable {
+                let table_id = hairpin_config
+                    .table_id
+                    .map(|num| num.get())
+                    .unwrap_or(DEFAULT_HAIRPIN_TABLE_ID);
+                let mut hairpin_routing =
+                    HairpinRouting::new(rt_helper.clone(), ctx.if_index, table_id);
+                let res = hairpin_routing
+                    .configure(
+                        internal_if_names,
+                        hairpin_config.ip_protocols.clone(),
+                        ctx.inst.v6_hairpin_dests(),
+                    )
+                    .await;
+                match res {
+                    Ok(()) => ctx.v6_hairpin_routing = Some(hairpin_routing),
+                    Err(e) => eprintln!("failed to configure IPv6 hairpin routing: {:?}", e),
+                }
+            }
+        }
     }
+
+    drop(rt_helper);
 
     let monitor = async {
         if !need_monitor {
@@ -134,7 +226,7 @@ async fn daemon(config: &Config) -> Result<()> {
             let MonitorEvent::ChangeAddress { if_index } = event;
 
             if let Some(ctx) = contexts.get_mut(&if_index) {
-                let new_addresses = query_addr.query_all_addresses(if_index).await?;
+                let new_addresses = ctx.rt_helper.query_all_addresses(if_index).await?;
                 if new_addresses.ipv4 != ctx.addresses.ipv4 {
                     eprintln!(
                         "IPv4 addresses {:?} -> {:?}",
@@ -152,15 +244,39 @@ async fn daemon(config: &Config) -> Result<()> {
                     ctx.inst.reconfigure_v6_addresses(&new_addresses.ipv6)?;
                     ctx.addresses.ipv6 = new_addresses.ipv6;
                 }
+
+                if let Some(hairpin_routing) = &mut ctx.v4_hairpin_routing {
+                    if let Err(e) = hairpin_routing
+                        .reconfigure_dests(ctx.inst.v4_hairpin_dests())
+                        .await
+                    {
+                        eprintln!("failed to reconfigure IPv4 hairpin routing: {:?}", e);
+                    }
+                }
+
+                #[cfg(feature = "ipv6")]
+                if let Some(hairpin_routing) = &mut ctx.v6_hairpin_routing {
+                    if let Err(e) = hairpin_routing
+                        .reconfigure_dests(ctx.inst.v6_hairpin_dests())
+                        .await
+                    {
+                        eprintln!("failed to reconfigure IPv6 hairpin routing: {:?}", e);
+                    }
+                }
             }
         }
 
         Result::<()>::Ok(())
     };
 
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+
     tokio::select! {
-        res = tokio::signal::ctrl_c() => {
-            res?;
+        _ = sigint.recv() => {
+            Result::<()>::Ok(())
+        }
+        _ = sigterm.recv() => {
             Result::<()>::Ok(())
         }
         res = monitor => {
@@ -168,11 +284,21 @@ async fn daemon(config: &Config) -> Result<()> {
         }
     }?;
 
+    Ok(monitor_task)
+}
+
+async fn daemon_guard(config: &Config) -> Result<()> {
+    let mut contexts: HashMap<u32, IfContext> = HashMap::with_capacity(config.interfaces.len());
+
+    let res = daemon(config, &mut contexts).await;
+
     for ctx in contexts.values_mut() {
-        ctx.inst.detach()?;
+        if let Err(e) = ctx.detach().await {
+            eprintln!("failed to cleanup context: {:?}", e);
+        };
     }
 
-    monitor_task.abort();
+    res?.abort();
     Ok(())
 }
 
@@ -218,5 +344,5 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    rt.block_on(daemon(&config))
+    rt.block_on(daemon_guard(&config))
 }

@@ -4,6 +4,7 @@
 
 use std::fmt::Display;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 
 use anyhow::Result;
@@ -109,6 +110,25 @@ impl Default for NetIfId {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Timeout(pub u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpProtocol {
+    Tcp,
+    Udp,
+    Icmp,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConfigHairpinRoute {
+    #[serde(default)]
+    pub enable: Option<bool>,
+    #[serde(default)]
+    pub internal_if_names: Vec<String>,
+    #[serde(default)]
+    pub table_id: Option<NonZeroU32>,
+    #[serde(default = "default_ip_protocols")]
+    pub ip_protocols: Vec<IpProtocol>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct ConfigNetIf {
     #[serde(flatten)]
@@ -139,6 +159,10 @@ pub struct ConfigNetIf {
     pub no_snat_dests: Vec<IpNet>,
     #[serde(default)]
     pub externals: Vec<ConfigExternal>,
+    #[serde(default)]
+    pub ipv4_hairpin_route: ConfigHairpinRoute,
+    #[serde(default)]
+    pub ipv6_hairpin_route: ConfigHairpinRoute,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -196,7 +220,42 @@ impl<'de> Deserialize<'de> for Timeout {
             }
         }
 
-        deserializer.deserialize_any(RangeVisitor)
+        deserializer.deserialize_str(RangeVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for IpProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct IpProtocolVisitor;
+        impl<'de> Visitor<'de> for IpProtocolVisitor {
+            type Value = IpProtocol;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("IP protocol: tcp, udp or icmp")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.eq_ignore_ascii_case("tcp") {
+                    Ok(IpProtocol::Tcp)
+                } else if v.eq_ignore_ascii_case("udp") {
+                    Ok(IpProtocol::Udp)
+                } else if v.eq_ignore_ascii_case("icmp") {
+                    Ok(IpProtocol::Icmp)
+                } else {
+                    Err(DeError::custom(
+                        "Invalid protocol name, expecting one of \"tcp\", \"udp\" or \"icmp\".",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_str(IpProtocolVisitor)
     }
 }
 
@@ -288,6 +347,10 @@ impl AddressMatcher {
 
 const fn default_true() -> bool {
     true
+}
+
+fn default_ip_protocols() -> Vec<IpProtocol> {
+    vec![IpProtocol::Tcp, IpProtocol::Udp]
 }
 
 #[cfg(test)]
