@@ -181,7 +181,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                 .await;
             match res {
                 Ok(()) => ctx.v4_hairpin_routing = Some(hairpin_routing),
-                Err(e) => eprintln!("failed to configure IPv4 hairpin routing: {:?}", e),
+                Err(e) => eprintln!("failed to configure IPv4 hairpin routing: {}", e),
             }
         }
 
@@ -207,7 +207,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                     .await;
                 match res {
                     Ok(()) => ctx.v6_hairpin_routing = Some(hairpin_routing),
-                    Err(e) => eprintln!("failed to configure IPv6 hairpin routing: {:?}", e),
+                    Err(e) => eprintln!("failed to configure IPv6 hairpin routing: {}", e),
                 }
             }
         }
@@ -250,7 +250,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                         .reconfigure_dests(ctx.inst.v4_hairpin_dests())
                         .await
                     {
-                        eprintln!("failed to reconfigure IPv4 hairpin routing: {:?}", e);
+                        eprintln!("failed to reconfigure IPv4 hairpin routing: {}", e);
                     }
                 }
 
@@ -260,7 +260,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                         .reconfigure_dests(ctx.inst.v6_hairpin_dests())
                         .await
                     {
-                        eprintln!("failed to reconfigure IPv6 hairpin routing: {:?}", e);
+                        eprintln!("failed to reconfigure IPv6 hairpin routing: {}", e);
                     }
                 }
             }
@@ -294,7 +294,7 @@ async fn daemon_guard(config: &Config) -> Result<()> {
 
     for ctx in contexts.values_mut() {
         if let Err(e) = ctx.detach().await {
-            eprintln!("failed to cleanup context: {:?}", e);
+            eprintln!("failed to cleanup context: {}", e);
         };
     }
 

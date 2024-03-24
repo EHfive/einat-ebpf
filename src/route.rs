@@ -162,17 +162,7 @@ impl RouteHelper {
             .push(RuleAttribute::Protocol(RouteProtocol::Kernel));
 
         if let Err(e) = add_local_rule.execute().await {
-            let is_exist = 'is_exist: {
-                if let rtnetlink::Error::NetlinkError(e) = &e {
-                    if let Some(code) = e.code {
-                        if code.get() == -libc::EEXIST {
-                            break 'is_exist true;
-                        }
-                    }
-                }
-                false
-            };
-            if !is_exist {
+            if !route_err_is_exist(&e) {
                 return Err(anyhow::anyhow!(e));
             }
             eprintln!("exist");
@@ -383,7 +373,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(())
     }
 
-    async fn del_all_route(&self) -> Result<()> {
+    async fn del_all_route(&mut self) -> Result<()> {
         let mut s = self.handle().route().get(N::IP_VERSION).execute();
         while let Some(route) = s.try_next().await? {
             if self
@@ -391,9 +381,12 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
                 .iter()
                 .any(|describer| describer.matches(&route))
             {
-                self.handle().route().del(route).execute().await?;
+                if let Err(e) = self.handle().route().del(route).execute().await {
+                    eprintln!("failed to delete route: {}", e);
+                }
             }
         }
+        self.routes.clear();
         Ok(())
     }
 
@@ -413,11 +406,23 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
         let rule = req.message_mut().clone();
 
-        req.execute().await?;
+        if let Err(e) = req.execute().await {
+            if !route_err_is_exist(&e) {
+                return Err(anyhow::anyhow!(e));
+            }
+        }
 
         self.rules.push(rule);
 
         Ok(())
+    }
+
+    async fn del_neigh(&mut self) {
+        if let Some((_, neigh)) = self.gateway_neigh.take() {
+            if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
+                eprintln!("failed to delete neigh entry: {}", e);
+            }
+        }
     }
 
     pub async fn reconfigure_neigh(&mut self, gateway: Option<N>) -> Result<()> {
@@ -426,9 +431,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             return Ok(());
         }
 
-        if let Some((_, neigh)) = self.gateway_neigh.take() {
-            self.handle().neighbours().del(neigh).execute().await?;
-        }
+        self.del_neigh().await;
 
         let Some(gateway) = gateway else {
             return Ok(());
@@ -476,7 +479,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(())
     }
 
-    pub async fn reconfigure_dests(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
+    async fn reconfigure_dests_(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
         self.del_all_route().await?;
         self.reconfigure_neigh(hairpin_dests.first().copied())
             .await?;
@@ -488,14 +491,21 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(())
     }
 
+    pub async fn reconfigure_dests(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
+        let res = self.reconfigure_dests_(hairpin_dests).await;
+        if res.is_err() {
+            let _ = self.deconfigure().await;
+        }
+        res
+    }
+
     pub async fn deconfigure(&mut self) -> Result<()> {
         for rule in core::mem::take(&mut self.rules) {
-            self.handle().rule().del(rule).execute().await?;
+            let _ = self.handle().rule().del(rule).execute().await;
         }
-        self.del_all_route().await?;
-        if let Some((_, neigh)) = self.gateway_neigh.take() {
-            self.handle().neighbours().del(neigh).execute().await?;
-        }
+        let _ = self.del_all_route().await;
+
+        self.del_neigh().await;
         Ok(())
     }
 }
@@ -536,6 +546,17 @@ pub fn spawn_monitor() -> Result<(
     });
 
     Ok((task, RouteHelper { handle }, events))
+}
+
+fn route_err_is_exist(e: &rtnetlink::Error) -> bool {
+    if let rtnetlink::Error::NetlinkError(e) = e {
+        if let Some(code) = e.code {
+            if code.get() == -libc::EEXIST {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn route_destination<N: RouteIpNetwork>(route: &RouteMessage) -> Option<N> {
