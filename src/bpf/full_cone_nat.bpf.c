@@ -209,7 +209,7 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
 #ifdef FEAT_IPV6
 static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
                                               struct inet_tuple *tuple,
-                                              u8 *nexthdr,
+                                              u8 *nexthdr_,
                                               struct frag_hdr *frag_hdr) {
 #define BPF_LOG_TOPIC "_parse_ipv6_packet"
     struct ipv6hdr *ip6h;
@@ -222,36 +222,45 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
     inet_addr_set_ip6(&tuple->saddr, ip6h->saddr.in6_u.u6_addr32);
     inet_addr_set_ip6(&tuple->daddr, ip6h->daddr.in6_u.u6_addr32);
 
-    u32 frag_hdr_off = 0;
     int len = sizeof(struct ipv6hdr);
-    *nexthdr = ip6h->nexthdr;
+    u32 frag_hdr_off = 0;
+    u8 nexthdr = ip6h->nexthdr;
+    struct ipv6_opt_hdr opthdr;
+
+    // XXX: this loop results enormous verification time
+    // MAX_IPV6_EXT_NUM minus one of auth header
 #pragma unroll
-    for (int i = 0; i < MAX_IPV6_EXT_NUM; i++) {
-        switch (*nexthdr) {
+    for (int i = 0; i < MAX_IPV6_EXT_NUM - 1; i++) {
+        switch (nexthdr) {
+        case NEXTHDR_AUTH:
+            // Just passthrough IPSec packet
+            return -1;
         case NEXTHDR_FRAGMENT:
             frag_hdr_off = len;
         case NEXTHDR_HOP:
         case NEXTHDR_ROUTING:
-        case NEXTHDR_AUTH:
         case NEXTHDR_DEST: {
-            struct ipv6_opt_hdr opthdr;
             if (bpf_skb_load_bytes(skb, l3_off + len, &opthdr,
                                    sizeof(opthdr))) {
                 return -1;
             }
-            if (*nexthdr != NEXTHDR_AUTH) {
-                len += (opthdr.hdrlen + 1) * 8;
-            } else {
-                len += (opthdr.hdrlen + 2) * 4;
-            }
-            *nexthdr = opthdr.nexthdr;
+            len += (opthdr.hdrlen + 1) * 8;
+            nexthdr = opthdr.nexthdr;
             break;
         }
         default:
             goto found_upper_layer;
         }
     }
-    return -1;
+
+    switch (nexthdr) {
+    case NEXTHDR_TCP:
+    case NEXTHDR_UDP:
+    case NEXTHDR_ICMP:
+        goto found_upper_layer;
+    default:
+        return -1;
+    }
 
 found_upper_layer:
     if (frag_hdr_off) {
@@ -260,8 +269,13 @@ found_upper_layer:
             return -1;
         }
     } else {
+        frag_hdr->nexthdr = 0;
+        frag_hdr->reserved = 0;
         frag_hdr->frag_off = 0;
+        frag_hdr->identification = 0;
     }
+
+    *nexthdr_ = nexthdr;
     return len;
 #undef BPF_LOG_TOPIC
 }
@@ -275,7 +289,7 @@ static __always_inline int parse_ipv6_packet_light(struct __sk_buff *skb,
     struct frag_hdr frag_hdr;
     int len = _parse_ipv6_packet(skb, l3_off, tuple, nexthdr, &frag_hdr);
     if (len < 0) {
-        return len;
+        return -1;
     }
 
     if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET)) {
@@ -294,7 +308,7 @@ parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
     int len =
         _parse_ipv6_packet(skb, l3_off, &pkt->tuple, &pkt->nexthdr, &frag_hdr);
     if (len < 0) {
-        return len;
+        return -1;
     }
 
     if (frag_hdr.frag_off) {
@@ -802,6 +816,7 @@ insert_new_binding(const struct map_binding_key *key,
 error_update:
     bpf_map_delete_elem(&map_binding, key);
     bpf_map_delete_elem(&map_binding, &key_rev);
+    return NULL;
 #undef BPF_LOG_TOPIC
 }
 
@@ -1155,6 +1170,7 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
 
         b_value = insert_new_binding(&b_key, &b_value_new, NULL);
         if (!b_value) {
+            barrier();
             return TC_ACT_SHOT;
         }
     }
@@ -1273,7 +1289,7 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
         }
 
         b_value = insert_new_binding(&b_key, &b_value_new, &b_value_rev);
-        if (!(b_value && b_value_rev)) {
+        if (!b_value) {
             return TC_ACT_SHOT;
         }
     }
