@@ -744,7 +744,7 @@ ipv4_update_csum_inner(struct __sk_buff *skb, u32 l4_csum_off, __be32 from_addr,
 static __always_inline void ipv4_update_csum_icmp_err(
     struct __sk_buff *skb, u32 icmp_csum_off, u32 err_ip_check_off,
     u32 err_l4_csum_off, __be32 from_addr, __be16 from_port, __be32 to_addr,
-    __be16 to_port, bool icmp_pseudo, bool err_l4_pseudo, bool l4_mangled_0) {
+    __be16 to_port, bool err_l4_pseudo, bool l4_mangled_0) {
 
     u16 prev_csum;
     u16 curr_csum;
@@ -758,9 +758,8 @@ static __always_inline void ipv4_update_csum_icmp_err(
     // update of inner message
 #if 1
     // the update of embedded layer 4 checksum is not required but may helpful
-    // for packet tracking
-    // the TCP checksum might not be included in IPv4 packet, check if it exist
-    // first
+    // for packet tracking the TCP checksum might not be included in IPv4
+    // packet, check if it exists first
     if (bpf_skb_load_bytes(skb, err_l4_csum_off, &prev_csum,
                            sizeof(prev_csum))) {
         ipv4_update_csum_inner(skb, err_l4_csum_off, from_addr, from_port,
@@ -772,12 +771,69 @@ static __always_inline void ipv4_update_csum_icmp_err(
 #endif
     bpf_l4_csum_replace(skb, icmp_csum_off, from_addr, to_addr, 4);
     bpf_l4_csum_replace(skb, icmp_csum_off, from_port, to_port, 2);
+}
 
-    if (icmp_pseudo) {
-        bpf_l4_csum_replace(skb, icmp_csum_off, from_addr, to_addr,
+#ifdef FEAT_IPV6
+
+static __always_inline void
+ipv6_update_csum(struct __sk_buff *skb, u32 l4_csum_off, __be32 from_addr[4],
+                 __be16 from_port, __be32 to_addr[4], __be16 to_port) {
+    bpf_l4_csum_replace(skb, l4_csum_off, from_port, to_port, 2);
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        bpf_l4_csum_replace(skb, l4_csum_off + i * 4, from_addr[i], to_addr[i],
                             4 | BPF_F_PSEUDO_HDR);
     }
 }
+
+static __always_inline void
+ipv6_update_csum_inner(struct __sk_buff *skb, u32 l4_csum_off,
+                       __be32 from_addr[4], __be16 from_port, __be32 to_addr[4],
+                       __be16 to_port) {
+    // use bpf_l3_csum_replace to avoid updating skb csum
+    bpf_l3_csum_replace(skb, l4_csum_off, from_port, to_port, 2);
+
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        bpf_l3_csum_replace(skb, l4_csum_off + i * 4, from_addr[i], to_addr[i],
+                            4);
+    }
+}
+
+static __always_inline void
+ipv6_update_csum_icmp_err(struct __sk_buff *skb, u32 icmp_csum_off,
+                          u32 err_l4_csum_off, __be32 from_addr[4],
+                          __be16 from_port, __be32 to_addr[4], __be16 to_port) {
+    // update of inner message
+#if 1
+    u16 prev_csum;
+    u16 curr_csum;
+    if (bpf_skb_load_bytes(skb, err_l4_csum_off, &prev_csum,
+                           sizeof(prev_csum))) {
+
+        ipv6_update_csum_inner(skb, err_l4_csum_off, from_addr, from_port,
+                               to_addr, to_port);
+
+        bpf_skb_load_bytes(skb, err_l4_csum_off, &curr_csum, sizeof(curr_csum));
+        bpf_l4_csum_replace(skb, icmp_csum_off, prev_csum, curr_csum, 2);
+    }
+#endif
+
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        bpf_l4_csum_replace(skb, icmp_csum_off + i * 4, from_addr[i],
+                            to_addr[i], 4);
+    }
+    bpf_l4_csum_replace(skb, icmp_csum_off, from_port, to_port, 2);
+
+#pragma unroll
+    for (int i = 0; i < 4; i++) {
+        bpf_l4_csum_replace(skb, icmp_csum_off + i * 4, from_addr[i],
+                            to_addr[i], 4 | BPF_F_PSEUDO_HDR);
+    }
+}
+
+#endif
 
 static __always_inline struct map_binding_value *
 insert_new_binding(const struct map_binding_key *key,
@@ -965,11 +1021,7 @@ modify_headers(struct __sk_buff *skb, bool is_ipv4, bool is_icmpx_error,
 #endif
         l4_to_port_off = offsetof(struct icmphdr, un.echo.id);
         l4_to_check_off = offsetof(struct icmphdr, checksum);
-#ifdef FEAT_IPV6
-        l4_check_pseudo = nexthdr == NEXTHDR_ICMP;
-#else
-        l4_check_pseudo = false;
-#endif
+        l4_check_pseudo = !is_ipv4;
         l4_check_mangle_0 = false;
         break;
     default:
@@ -993,17 +1045,38 @@ modify_headers(struct __sk_buff *skb, bool is_ipv4, bool is_icmpx_error,
         return ret;
     }
 
-    // TODO: handle IPv6
     if (is_icmpx_error) {
-        ipv4_update_csum_icmp_err(
-            skb, l4_off + offsetof(struct icmphdr, checksum),
-            icmpx_err_l3_offset(l4_off) + offsetof(struct iphdr, check),
-            err_l4_off + l4_to_check_off, from_addr->ip, from_port, to_addr->ip,
-            to_port, !is_ipv4, l4_check_pseudo, l4_check_mangle_0);
+        if (is_ipv4) {
+            ipv4_update_csum_icmp_err(
+                skb, l4_off + offsetof(struct icmphdr, checksum),
+                icmpx_err_l3_offset(l4_off) + offsetof(struct iphdr, check),
+                err_l4_off + l4_to_check_off, from_addr->ip, from_port,
+                to_addr->ip, to_port, l4_check_pseudo, l4_check_mangle_0);
+        } else {
+#ifdef FEAT_IPV6
+            ipv6_update_csum_icmp_err(
+                skb, l4_off + offsetof(struct icmphdr, checksum),
+                err_l4_off + l4_to_check_off, from_addr->ip6, from_port,
+                to_addr->ip6, to_port);
+#else
+            __bpf_unreachable();
+#endif
+        }
     } else {
-        ipv4_update_csum(skb, l4_off + l4_to_check_off, from_addr->ip,
-                         from_port, to_addr->ip, to_port, l4_check_pseudo,
-                         l4_check_mangle_0);
+        if (is_ipv4) {
+            ipv4_update_csum(skb, l4_off + l4_to_check_off, from_addr->ip,
+                             from_port, to_addr->ip, to_port, l4_check_pseudo,
+                             l4_check_mangle_0);
+        } else {
+#ifdef FEAT_IPV6
+            // For IPv6, checksum pseudo header calculation is required and
+            // zero-checksum should not be mangled.
+            ipv6_update_csum(skb, l4_off + l4_to_check_off, from_addr->ip6,
+                             from_port, to_addr->ip6, to_port);
+#else
+            __bpf_unreachable();
+#endif
+        }
     }
 
     return 0;
@@ -1072,6 +1145,8 @@ static int __always_inline fill_unique_binding_port(
         ext_config, l4proto, is_outbound ? RANGE_OUTBOUND : RANGE_INBOUND,
         &proto_range);
     if (range_len == 0) {
+        // TODO: make range_len=0 a semantic of passthrough NAT for respective
+        // IP protocol
         return TC_ACT_SHOT;
     }
     if (range_len > MAX_PORT_RANGES) {
@@ -1224,9 +1299,14 @@ int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
     }
 
     if (is_ipv4) {
-        bpf_log_debug("orig_src:%pI4, orig_dst:%pI4, src:%pI4, dst:%pI4",
+        bpf_log_trace("orig_src:%pI4, orig_dst:%pI4, src:%pI4, dst:%pI4",
                       &saddr->ip, &daddr->ip, &params.ipv4_src,
                       &params.ipv4_dst);
+    } else {
+#ifdef FEAT_IPV6
+        bpf_log_trace("orig_src:%pI6, orig_dst:%pI6, src:%pI6, dst:%pI6",
+                      saddr->ip6, daddr->ip6, params.ipv6_src, params.ipv6_dst);
+#endif
     }
 
     return TC_ACT_OK;
@@ -1238,6 +1318,7 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
                              bool do_new, const struct inet_tuple *origin,
                              struct map_binding_value **b_value_,
                              struct map_binding_value **b_value_rev_) {
+#define BPF_LOG_TOPIC "egress_lookup_or_new_binding"
     struct map_binding_key b_key = {
         .ifindex = skb->ifindex,
         .flags =
@@ -1297,6 +1378,7 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
     *b_value_ = b_value;
     *b_value_rev_ = b_value_rev;
     return TC_ACT_OK;
+#undef BPF_LOG_TOPIC
 }
 
 enum {
@@ -1566,14 +1648,13 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     // XXX: just use local variables instead
     struct packet_info pkt;
 
+    // XXX: separate out IPV4 and IPV6 outer branches and dispatch with tail
+    // call to reduce complexity
     ret = parse_packet(skb, &pkt);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
             bpf_log_trace("invalid packet");
         }
-        return TC_ACT_UNSPEC;
-    }
-    if (!IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 
@@ -1652,9 +1733,6 @@ int egress_snat(struct __sk_buff *skb) {
         if (ret == TC_ACT_SHOT) {
             bpf_log_trace("invalid packet");
         }
-        return TC_ACT_UNSPEC;
-    }
-    if (!IS_IPV4(&pkt)) {
         return TC_ACT_UNSPEC;
     }
 

@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#ifndef __bpf__
+#define __bpf__
+#endif
+
 #include "kernel/vmlinux.h"
 
 #include <bpf/bpf_core_read.h>

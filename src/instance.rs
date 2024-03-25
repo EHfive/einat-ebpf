@@ -580,11 +580,11 @@ impl RuntimeConfig for RuntimeV6Config {
     }
 
     fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
-        maps.map_ipv4_dest_config()
+        maps.map_ipv6_dest_config()
     }
 
     fn skel_map_external_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
-        maps.map_ipv4_external_config()
+        maps.map_ipv6_external_config()
     }
 }
 

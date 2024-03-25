@@ -238,14 +238,9 @@ impl RouteIpNetwork for Ipv6Net {
     fn route_add_set_dest(
         &self,
         req: RouteAddRequest<()>,
-        gateway: &Self,
+        _gateway: &Self,
     ) -> RouteAddRequest<Self::Addr> {
-        let req = req.v6().destination_prefix(self.addr(), self.prefix_len());
-        if gateway == self {
-            req
-        } else {
-            req.gateway(gateway.addr())
-        }
+        req.v6().destination_prefix(self.addr(), self.prefix_len())
     }
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest {
@@ -360,6 +355,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             .table_id(self.table_id)
             .output_interface(self.external_if_index);
 
+        // FIXME: can't use local address as gateway, add neigh entry for each destination address
         dest.route_add_set_dest(req, gateway).execute().await?;
 
         self.routes.push(RouteDescriber {
