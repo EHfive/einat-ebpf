@@ -113,7 +113,7 @@ impl IfContext {
     }
 }
 
-const DEFAULT_HAIRPIN_TABLE_ID: u32 = 3000;
+const DEFAULT_HAIRPIN_TABLE_ID: u32 = 4787;
 
 async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Result<JoinHandle<()>> {
     let (monitor_task, rt_helper, events) = route::spawn_monitor()?;

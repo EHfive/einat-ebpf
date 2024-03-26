@@ -44,12 +44,12 @@ internal_if_names = [
     # "internal"
 ]
 ip_protocols = ["tcp", "udp"]
-table_id = 3000
+table_id = 4787
 
 [interfaces.ipv6_hairpin_route]
 internal_if_names = []
 ip_protocols = ["tcp", "udp"]
-table_id = 3000
+table_id = 4787
 
 # The first static or matching address would be used as NAT external address.
 [[interfaces.externals]]
