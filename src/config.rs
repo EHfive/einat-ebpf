@@ -161,12 +161,14 @@ pub struct ConfigNetIf {
     pub externals: Vec<ConfigExternal>,
     #[serde(default)]
     pub ipv4_hairpin_route: ConfigHairpinRoute,
+    #[cfg(feature = "ipv6")]
     #[serde(default)]
     pub ipv6_hairpin_route: ConfigHairpinRoute,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)]
 pub struct Config {
     #[serde(default)]
     pub version: Option<u32>,

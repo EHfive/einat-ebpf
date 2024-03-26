@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Model for configuration variables and maps of our eBPF application
-use std::iter::Iterator;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, Ipv4Addr};
@@ -67,6 +66,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub trait IpNetwork: Sized {
     type Addr;
     const LEN: u8;
