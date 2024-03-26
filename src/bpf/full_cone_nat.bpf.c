@@ -536,7 +536,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
                 &err_tuple.saddr.ip, &err_tuple.daddr.ip,
                 bpf_ntohs(err_tuple.sport), bpf_ntohs(err_tuple.dport));
 
-            if (!ADDR6_EQ(pkt->tuple.daddr.all, err_tuple.saddr.all)) {
+            if (!inet_addr_equal(&pkt->tuple.daddr, &err_tuple.saddr)) {
                 bpf_log_error("IP destination address does not match source "
                               "address inside ICMP error message");
                 return TC_ACT_SHOT;
@@ -1700,7 +1700,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
             !g_deleting_map_entires && !is_icmpx_error &&
             ((b_value->use != 0 && pkt_allow_initiating_ct(pkt.pkt_type)) ||
              (do_inbound_binding &&
-              ADDR6_EQ(b_value->to_addr.all, pkt.tuple.daddr.all)));
+              inet_addr_equal(&b_value->to_addr, &pkt.tuple.daddr)));
 
         struct map_ct_value *ct_value;
         ret = ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,

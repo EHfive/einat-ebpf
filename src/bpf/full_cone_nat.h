@@ -226,7 +226,16 @@ struct map_ct_value {
 };
 
 #define COPY_ADDR6(t, s) (__builtin_memcpy((t), (s), sizeof(t)))
-#define ADDR6_EQ(t, s) (0 == __builtin_memcmp((t), (s), sizeof(t)))
+
+static __always_inline bool inet_addr_equal(const union u_inet_addr *a,
+                                            const union u_inet_addr *b) {
+#ifdef FEAT_IPV6
+    return a->all[0] == b->all[0] && a->all[1] == b->all[1] &&
+           a->all[2] == b->all[2] && a->all[3] == b->all[3];
+#else
+    return a->ip == b->ip;
+#endif
+}
 
 static __always_inline void inet_addr_set_ip(union u_inet_addr *addr,
                                              __be32 ip) {
