@@ -17,6 +17,8 @@ strip = true
 [features]
 default = []
 ipv6 = []
+# Required on 32-bit platforms
+bindgin = ["libbpf-sys/bindgen"]
 # Link against static `libelf` and `zlib`.
 static = ["libbpf-sys/static"]
 #
