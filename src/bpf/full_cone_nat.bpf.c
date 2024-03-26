@@ -702,8 +702,7 @@ static __always_inline bool nat_in_binding_range(struct external_config *config,
                                                  u8 nexthdr, u16 ext_port) {
     struct port_range *proto_range;
     u8 range_len = select_port_range(config, nexthdr, RANGE_ALL, &proto_range);
-    if (range_len >= 0 &&
-        find_port_range_idx(ext_port, range_len, proto_range) >= 0) {
+    if (find_port_range_idx(ext_port, range_len, proto_range) >= 0) {
         return true;
     }
     return false;
@@ -1136,32 +1135,20 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx) {
 }
 
 static int __always_inline fill_unique_binding_port(
-    struct external_config *ext_config, u8 l4proto, bool is_outbound,
+    struct port_range *proto_range, u8 range_len,
     const struct map_binding_key *key, struct map_binding_value *val) {
 #define BPF_LOG_TOPIC "find_binding_port"
-
-    struct port_range *proto_range;
-    u8 range_len = select_port_range(
-        ext_config, l4proto, is_outbound ? RANGE_OUTBOUND : RANGE_INBOUND,
-        &proto_range);
-    if (range_len == 0) {
-        // TODO: make range_len=0 a semantic of passthrough NAT for respective
-        // IP protocol
-        return TC_ACT_SHOT;
-    }
-    if (range_len > MAX_PORT_RANGES) {
-        range_len = MAX_PORT_RANGES;
-    }
-
     struct find_port_ctx ctx;
 
     get_rev_dir_binding_key(key, val, &ctx.key);
     ctx.curr_port = bpf_ntohs(ctx.key.from_port);
     ctx.found = false;
 
-    int start_range_idx =
+    // Annotate as unsigned to avoid signed division on index calculation below
+    u32 start_range_idx =
         find_port_range_idx(ctx.curr_port, range_len, proto_range);
-    if (start_range_idx < 0) {
+    barrier_var(start_range_idx);
+    if ((s32)start_range_idx < 0) {
         start_range_idx = bpf_get_prandom_u32() % range_len;
     }
 
@@ -1237,7 +1224,17 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
         partial_init_binding_value(is_ipv4, b_key.from_port, &b_value_new);
         COPY_ADDR6(b_value_new.to_addr.all, b_key.from_addr.all);
 
-        int ret = fill_unique_binding_port(ext_config, l4proto, false, &b_key,
+        struct port_range *proto_range;
+        u8 range_len =
+            select_port_range(ext_config, l4proto, RANGE_INBOUND, &proto_range);
+        barrier_var(range_len);
+        if (range_len == 0) {
+            // range_len=0 is defined as the semantic of passthrough NAT for
+            // respective IP protocol
+            return TC_ACT_UNSPEC;
+        }
+
+        int ret = fill_unique_binding_port(proto_range, range_len, &b_key,
                                            &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
@@ -1363,7 +1360,17 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
             return ret;
         }
 
-        ret = fill_unique_binding_port(ext_config, l4proto, true, &b_key,
+        struct port_range *proto_range;
+        u8 range_len = select_port_range(ext_config, l4proto, RANGE_OUTBOUND,
+                                         &proto_range);
+        barrier_var(range_len);
+        if (range_len == 0) {
+            // range_len=0 is defined as the semantic of passthrough NAT for
+            // respective IP protocol
+            return TC_ACT_UNSPEC;
+        }
+
+        ret = fill_unique_binding_port(proto_range, range_len, &b_key,
                                        &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
