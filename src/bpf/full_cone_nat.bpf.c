@@ -1436,7 +1436,6 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
     ct_value_new.flags =
         FLAGS_IS_IPV4(b_value->flags) ? ADDR_IPV4_FLAG : ADDR_IPV6_FLAG;
     ct_value_new.state = CT_INIT_IN;
-    ct_value_new.last_seen = 0;
     COPY_ADDR6(ct_value_new.origin.saddr.all, b_value->to_addr.all);
     ct_value_new.origin.sport = b_value->to_port;
     // XXX: do reverse NAT64 (i.e. append NAT64 prefix) if reply is IPv4 and
