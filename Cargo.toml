@@ -42,12 +42,19 @@ libc = "0.2.151"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
 netlink-sys = "0.8.5"
-nix = "0.27.1"
+nix = { version = "0.27.1", features = ["net"] }
 prefix-trie = "0.2.5"
 rtnetlink = "0.14.1"
 serde = { version = "1.0.197", features = ["derive"] }
 tokio = { version = "1.35.1", features = ["macros", "rt", "signal", "sync"] }
 toml = { version = "0.8.10", default-features = false, features = ["parse"] }
 
+[target.'cfg(not(target_arch="x86_64"))'.dependencies]
+libbpf-sys = { version = "1.2.1", features = ["bindgen"] }
+
 [build-dependencies]
 libbpf-cargo = "0.22.0"
+
+[patch.crates-io]
+libbpf-rs = { version = "0.22.0", git = "https://github.com/libbpf/libbpf-rs.git" }
+libbpf-sys = { version = "1.2.1", git = "https://github.com/EHfive/libbpf-sys.git", branch = "write-bindgen-to-out-dir" }

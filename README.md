@@ -19,10 +19,12 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 cargo install --git https://github.com/EHfive/bpf-full-cone-nat
 ```
 
-Or use Nix flakes we provide.
+Or build static binaries with Nix flakes we provide.
 
 ```shell
-nix build github:EHfive/bpf-full-cone-nat
+nix build github:EHfive/bpf-full-cone-nat#static-x86_64-unknown-linux-musl
+# Cross compile for aarch64
+nix build github:EHfive/bpf-full-cone-nat#static-aarch64-unknown-linux-musl
 ```
 
 ## Usage
