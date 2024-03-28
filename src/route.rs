@@ -187,7 +187,7 @@ pub trait RouteIpNetwork: IpNetwork + Copy + Eq {
     fn route_add_set_dest(
         &self,
         req: RouteAddRequest<()>,
-        gateway: &Self,
+        gateway: Option<&Self>,
     ) -> RouteAddRequest<Self::Addr>;
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest;
@@ -203,14 +203,15 @@ impl RouteIpNetwork for Ipv4Net {
     fn route_add_set_dest(
         &self,
         req: RouteAddRequest<()>,
-        gateway: &Self,
+        gateway: Option<&Self>,
     ) -> RouteAddRequest<Self::Addr> {
         let req = req.v4().destination_prefix(self.addr(), self.prefix_len());
-        if gateway == self {
-            req
-        } else {
-            req.gateway(gateway.addr())
+        if let Some(gateway) = gateway {
+            if gateway != self {
+                return req.gateway(gateway.addr());
+            }
         }
+        req
     }
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest {
@@ -238,9 +239,15 @@ impl RouteIpNetwork for Ipv6Net {
     fn route_add_set_dest(
         &self,
         req: RouteAddRequest<()>,
-        _gateway: &Self,
+        gateway: Option<&Self>,
     ) -> RouteAddRequest<Self::Addr> {
-        req.v6().destination_prefix(self.addr(), self.prefix_len())
+        let req = req.v6().destination_prefix(self.addr(), self.prefix_len());
+        if let Some(gateway) = gateway {
+            if gateway != self {
+                return req.gateway(gateway.addr());
+            }
+        }
+        req
     }
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest {
@@ -277,10 +284,11 @@ pub struct HairpinRouting<N> {
     rt_helper: RouteHelper,
     external_if_index: u32,
     table_id: u32,
-    gateway_neigh: Option<(N, NeighbourMessage)>,
     hairpin_dests: Vec<N>,
     rules: Vec<RuleMessage>,
     routes: Vec<RouteDescriber<N>>,
+    neighs: Vec<NeighbourMessage>,
+    cache_ll_addr: Option<Option<Vec<u8>>>,
 }
 
 impl<N: RouteIpNetwork> HairpinRouting<N> {
@@ -289,10 +297,11 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             rt_helper,
             external_if_index,
             table_id,
-            gateway_neigh: Default::default(),
             hairpin_dests: Default::default(),
             rules: Default::default(),
             routes: Default::default(),
+            neighs: Default::default(),
+            cache_ll_addr: Default::default(),
         }
     }
 
@@ -306,9 +315,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         mut ip_protocols: Vec<IpProtocol>,
         hairpin_dests: Vec<N>,
     ) -> Result<()> {
-        assert!(
-            self.gateway_neigh.is_none() && self.rules.is_empty() && self.hairpin_dests.is_empty()
-        );
+        assert!(self.neighs.is_empty() && self.rules.is_empty() && self.hairpin_dests.is_empty());
 
         self.reconfigure_dests(hairpin_dests).await?;
 
@@ -345,8 +352,6 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
     }
 
     async fn add_route(&mut self, dest: N) -> Result<()> {
-        let (gateway, _) = self.gateway_neigh.as_ref().expect("no gateway");
-
         let req = self
             .handle()
             .route()
@@ -355,14 +360,25 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             .table_id(self.table_id)
             .output_interface(self.external_if_index);
 
-        // FIXME: can't use local address as gateway, add neigh entry for each destination address
-        dest.route_add_set_dest(req, gateway).execute().await?;
+        dest.route_add_set_dest(req, None).execute().await?;
 
         self.routes.push(RouteDescriber {
             destination: dest,
             output_if_index: self.external_if_index,
             table_id: self.table_id,
         });
+
+        if let Some(ll_addr) = self.get_ll_addr().await? {
+            let mut req = dest
+                .neigh_add(self.external_if_index, self.handle())
+                .link_local_address(&ll_addr)
+                .replace()
+                .state(NeighbourState::Permanent);
+            let neigh = req.message_mut().clone();
+
+            req.execute().await?;
+            self.neighs.push(neigh);
+        }
 
         Ok(())
     }
@@ -381,6 +397,15 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             }
         }
         self.routes.clear();
+
+        for neigh in core::mem::take(&mut self.neighs) {
+            if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
+                eprintln!("failed to delete neigh entry: {}", e);
+            }
+        }
+
+        self.cache_ll_addr = None;
+
         Ok(())
     }
 
@@ -412,26 +437,10 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(())
     }
 
-    async fn del_neigh(&mut self) {
-        if let Some((_, neigh)) = self.gateway_neigh.take() {
-            if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
-                eprintln!("failed to delete neigh entry: {}", e);
-            }
+    async fn get_ll_addr(&mut self) -> Result<Option<Vec<u8>>> {
+        if let Some(ll_addr) = &self.cache_ll_addr {
+            return Ok(ll_addr.clone());
         }
-    }
-
-    pub async fn reconfigure_neigh(&mut self, gateway: Option<N>) -> Result<()> {
-        let prev_gateway = self.gateway_neigh.as_ref().map(|(gateway, _)| *gateway);
-        if prev_gateway == gateway {
-            return Ok(());
-        }
-
-        self.del_neigh().await;
-
-        let Some(gateway) = gateway else {
-            return Ok(());
-        };
-
         let external_link = self
             .handle()
             .link()
@@ -453,31 +462,17 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
                 None
             }
         });
-        let Some(ll_addr) = ll_addr else {
-            return Err(anyhow::anyhow!(
-                "external interface {} has no link local address",
-                self.external_if_index
-            ));
-        };
+        if ll_addr.is_none() {
+            // No link address, could be a TUN device
+            eprintln!("no link address on if {}", self.external_if_index);
+        }
 
-        let mut req = gateway
-            .neigh_add(self.external_if_index, self.handle())
-            .link_local_address(&ll_addr)
-            .replace()
-            .state(NeighbourState::Permanent);
-        let neigh = req.message_mut().clone();
-
-        req.execute().await?;
-
-        self.gateway_neigh = Some((gateway, neigh));
-
-        Ok(())
+        self.cache_ll_addr = Some(ll_addr.clone());
+        Ok(ll_addr)
     }
 
     async fn reconfigure_dests_(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
         self.del_all_route().await?;
-        self.reconfigure_neigh(hairpin_dests.first().copied())
-            .await?;
 
         for dest in hairpin_dests {
             self.add_route(dest).await?;
@@ -500,7 +495,6 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         }
         let _ = self.del_all_route().await;
 
-        self.del_neigh().await;
         Ok(())
     }
 }
