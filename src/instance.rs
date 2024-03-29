@@ -17,7 +17,7 @@ use libbpf_rs::{MapFlags, TcHook, TcHookBuilder, TC_EGRESS, TC_INGRESS};
 use prefix_trie::{Prefix, PrefixMap, PrefixSet};
 
 use crate::config::{AddressOrMatcher, ConfigDefaults, ConfigExternal, ConfigNetIf, ProtoRange};
-use crate::route::IfAddresses;
+use crate::route::{IfAddresses, PacketEncap};
 use crate::skel;
 use crate::skel::{
     DestConfig as BpfDestConfig, DestFlags, ExternalConfig as BpfExternalConfig, ExternalFlags,
@@ -28,6 +28,7 @@ use crate::utils::{IpNetwork, MapChange, PrefixMapDiff};
 #[derive(Debug, Default)]
 struct ConstConfig {
     log_level: Option<u8>,
+    has_eth_encap: Option<bool>,
     enable_fib_lookup_src: Option<bool>,
     allow_inbound_icmpx: Option<bool>,
     timeout_fragment: Option<u64>,
@@ -91,6 +92,9 @@ impl ConstConfig {
         let rodata = skel.rodata_mut();
         if let Some(log_level) = self.log_level {
             rodata.LOG_LEVEL = log_level;
+        }
+        if let Some(has_eth_encap) = self.has_eth_encap {
+            rodata.HAS_ETH_ENCAP = has_eth_encap as _;
         }
         if let Some(enable_fib_lookup_src) = self.enable_fib_lookup_src {
             rodata.ENABLE_FIB_LOOKUP_SRC = enable_fib_lookup_src as _;
@@ -624,13 +628,29 @@ impl RuntimeV6Config {
 impl InstanceConfig {
     pub fn try_from(
         if_index: u32,
+        if_encap: PacketEncap,
         if_config: &ConfigNetIf,
         defaults: &ConfigDefaults,
         addresses: &IfAddresses,
     ) -> Result<Self> {
+        let has_eth_encap = match if_encap {
+            PacketEncap::Ethernet => true,
+            PacketEncap::BareIp => false,
+            PacketEncap::Unsupported => {
+                return Err(anyhow::anyhow!(
+                    "Interface has unsupported packet encapsulation"
+                ))
+            }
+            PacketEncap::Unknown => {
+                eprintln!("unknown interface packet encapsulation, fallback to no encap");
+                false
+            }
+        };
+
         let const_config = ConstConfig {
             // defaults to disable logging
             log_level: Some(if_config.bpf_log_level.unwrap_or(0).min(5)),
+            has_eth_encap: Some(has_eth_encap),
             enable_fib_lookup_src: if_config.bpf_fib_lookup_external,
             allow_inbound_icmpx: if_config.allow_inbound_icmpx,
             timeout_fragment: if_config.timeout_fragment.map(Into::into),

@@ -122,9 +122,16 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
 
     for (config_idx, if_config) in config.interfaces.iter().enumerate() {
         let if_index = if_config.interface.resolve_index()?;
+        let link_info = rt_helper.query_link_info(if_index).await?;
+
         let addresses = rt_helper.query_all_addresses(if_index).await?;
-        let inst_config =
-            instance::InstanceConfig::try_from(if_index, if_config, &config.defaults, &addresses)?;
+        let inst_config = instance::InstanceConfig::try_from(
+            if_index,
+            link_info.encap(),
+            if_config,
+            &config.defaults,
+            &addresses,
+        )?;
         inst_configs.insert(if_index, (config_idx, inst_config, addresses));
     }
 

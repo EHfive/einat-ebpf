@@ -8,6 +8,9 @@
 
 const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
 
+// Bare IP packet if false
+const volatile u8 HAS_ETH_ENCAP = true;
+
 // Lookup external source address from FIB instead of using
 // g_ipv4_external_addr, requires Linux kernel>=6.7
 const volatile u8 ENABLE_FIB_LOOKUP_SRC = false;
@@ -135,6 +138,8 @@ struct packet_info {
     // ICMP error message
     int err_l4_off;
 };
+
+#define TC_SKB_L3_OFF() (HAS_ETH_ENCAP ? sizeof(struct ethhdr) : 0)
 
 #ifdef FEAT_IPV6
 #define IS_IPV4(pkt) ((pkt)->is_ipv4)
@@ -387,7 +392,7 @@ static __always_inline __be16 get_icmpx_query_id(struct icmphdr *icmph) {
 
 #define ICMP_ERR_PACKET_L4_LEN 8
 static __always_inline int parse_packet_light(struct __sk_buff *skb,
-                                              bool is_ipv4, int l3_off,
+                                              bool is_ipv4, u32 l3_off,
                                               struct inet_tuple *tuple,
                                               u8 *nexthdr, int *l3_hdr_len) {
 #define BPF_LOG_TOPIC "parse_packet_light"
@@ -451,28 +456,23 @@ static __always_inline int parse_packet_light(struct __sk_buff *skb,
 #undef BPF_LOG_TOPIC
 }
 
-static __always_inline int parse_packet(struct __sk_buff *skb,
-                                        struct packet_info *pkt) {
+static __always_inline int parse_packet(struct __sk_buff *skb, bool is_ipv4,
+                                        u32 l3_off, struct packet_info *pkt) {
 #define BPF_LOG_TOPIC "parse_packet"
-    void *data_end = ctx_data_end(skb);
-    struct ethhdr *eth = ctx_data(skb);
-    if ((void *)(eth + 1) > data_end) {
-        return TC_ACT_SHOT;
-    }
 
     int l3_header_len;
-    if (eth->h_proto == bpf_htons(ETH_P_IP)) {
+    if (is_ipv4) {
         struct iphdr *iph;
-        if (VALIDATE_PULL(skb, &iph, TC_SKB_L3_OFF, sizeof(*iph))) {
+        if (VALIDATE_PULL(skb, &iph, l3_off, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
         l3_header_len = parse_ipv4_packet(pkt, iph);
-#ifdef FEAT_IPV6
-    } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
-        l3_header_len = parse_ipv6_packet(skb, pkt, TC_SKB_L3_OFF);
-#endif
     } else {
+#ifdef FEAT_IPV6
+        l3_header_len = parse_ipv6_packet(skb, pkt, l3_off);
+#else
         return TC_ACT_UNSPEC;
+#endif
     }
 
     if (l3_header_len < 0) {
@@ -488,7 +488,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb,
         pkt->tuple.dport = 0;
         return TC_ACT_OK;
     }
-    pkt->l4_off = TC_SKB_L3_OFF + l3_header_len;
+    pkt->l4_off = l3_off + l3_header_len;
 
     if (pkt->nexthdr == IPPROTO_TCP) {
         struct tcphdr *tcph;
@@ -1648,15 +1648,68 @@ ct_state_transition(u32 ifindex, u8 l4proto, u8 pkt_type, bool is_outbound,
 #undef BPF_LOG_TOPIC
 }
 
+static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
+    void *data_end = ctx_data_end(skb);
+    void *data = ctx_data(skb);
+    bool is_ipv4;
+    if (HAS_ETH_ENCAP) {
+        struct ethhdr *eth = data;
+        if ((void *)(eth + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+
+        if (eth->h_proto == bpf_htons(ETH_P_IP)) {
+            is_ipv4 = true;
+#ifdef FEAT_IPV6
+        } else if (eth->h_proto == bpf_htons(ETH_P_IPV6)) {
+            is_ipv4 = false;
+#endif
+        } else {
+            return TC_ACT_UNSPEC;
+        }
+    } else {
+        u8 *p_version = data;
+        if ((void *)(p_version + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        u8 version = (*p_version) >> 4;
+        if (version == 4) {
+            is_ipv4 = true;
+#ifdef FEAT_IPV6
+        } else if (version == 6) {
+            is_ipv4 = false;
+#endif
+        } else {
+            return TC_ACT_UNSPEC;
+        }
+    }
+    *is_ipv4_ = is_ipv4;
+    return TC_ACT_OK;
+}
+
+// Ensure we are using PKT_IS_IPV4()
+#undef IS_IPV4
+#ifdef FEAT_IPV6
+#define PKT_IS_IPV4() (is_ipv4)
+#else
+#define PKT_IS_IPV4() (true)
+#endif
+
 SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "ingress<=="
     int ret;
+    // XXX: separate out IPV4 and IPV6 outer branches and dispatch with tail
+    // call to further reduce complexity
+    // Also somehow use a separate is_ipv4 variable reduce complexity greatly..
+    bool is_ipv4;
+    ret = get_is_ipv4(skb, &is_ipv4);
+    if (ret != TC_ACT_OK) {
+        return ret;
+    }
+
     // XXX: just use local variables instead
     struct packet_info pkt;
-
-    // XXX: separate out IPV4 and IPV6 outer branches and dispatch with tail
-    // call to reduce complexity
-    ret = parse_packet(skb, &pkt);
+    ret = parse_packet(skb, PKT_IS_IPV4(), TC_SKB_L3_OFF(), &pkt);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
             bpf_log_trace("invalid packet");
@@ -1665,7 +1718,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     struct external_config *ext_config =
-        lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
+        lookup_external_config(PKT_IS_IPV4(), &pkt.tuple.daddr);
     if ((ret = nat_check_external_config(ext_config)) != TC_ACT_OK) {
         return ret;
     }
@@ -1684,7 +1737,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
                               !is_icmpx_error && is_icmpx(pkt.nexthdr);
 
     struct map_binding_value *b_value;
-    ret = ingress_lookup_or_new_binding(skb->ifindex, IS_IPV4(&pkt), ext_config,
+    ret = ingress_lookup_or_new_binding(skb->ifindex, PKT_IS_IPV4(), ext_config,
                                         pkt.nexthdr, do_inbound_binding,
                                         &pkt.tuple, &b_value);
     if (ret == TC_ACT_UNSPEC) {
@@ -1702,7 +1755,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
               inet_addr_equal(&b_value->to_addr, &pkt.tuple.daddr)));
 
         struct map_ct_value *ct_value;
-        ret = ingress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
+        ret = ingress_lookup_or_new_ct(skb->ifindex, PKT_IS_IPV4(), pkt.nexthdr,
                                        do_inbound_ct, &pkt.tuple, b_value,
                                        &ct_value);
         if (ret == LK_CT_NONE || ret == LK_CT_ERROR_NEW) {
@@ -1715,8 +1768,8 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     // modify dest
-    ret = modify_headers(skb, IS_IPV4(&pkt), is_icmpx_error, pkt.nexthdr,
-                         TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, false,
+    ret = modify_headers(skb, PKT_IS_IPV4(), is_icmpx_error, pkt.nexthdr,
+                         TC_SKB_L3_OFF(), pkt.l4_off, pkt.err_l4_off, false,
                          &pkt.tuple.daddr, pkt.tuple.dport, &b_value->to_addr,
                          b_value->to_port);
     if (ret) {
@@ -1732,9 +1785,15 @@ SEC("tc")
 int egress_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "egress ==>"
     int ret;
-    struct packet_info pkt;
+    bool is_ipv4;
+    ret = get_is_ipv4(skb, &is_ipv4);
+    if (ret != TC_ACT_OK) {
+        return ret;
+    }
 
-    ret = parse_packet(skb, &pkt);
+    // XXX: just use local variables instead
+    struct packet_info pkt;
+    ret = parse_packet(skb, PKT_IS_IPV4(), TC_SKB_L3_OFF(), &pkt);
     if (ret != TC_ACT_OK) {
         if (ret == TC_ACT_SHOT) {
             bpf_log_trace("invalid packet");
@@ -1745,14 +1804,14 @@ int egress_snat(struct __sk_buff *skb) {
     bool do_hairpin = false;
     bool pass_nat = false;
     struct dest_config *dest_config =
-        lookup_dest_config(IS_IPV4(&pkt), &pkt.tuple.daddr);
+        lookup_dest_config(PKT_IS_IPV4(), &pkt.tuple.daddr);
     if (dest_config) {
         do_hairpin = dest_hairpin(dest_config);
         pass_nat = dest_pass_nat(dest_config);
     }
 
     struct external_config *ext_config =
-        lookup_external_config(IS_IPV4(&pkt), &pkt.tuple.saddr);
+        lookup_external_config(PKT_IS_IPV4(), &pkt.tuple.saddr);
     if (ext_config) { // this packet was send from local NAT host
         if (external_pass_nat(ext_config)) {
             goto check_hairpin;
@@ -1789,7 +1848,7 @@ int egress_snat(struct __sk_buff *skb) {
                   pkt_allow_initiating_ct(pkt.pkt_type);
 
     struct map_binding_value *b_value, *b_value_rev;
-    ret = egress_lookup_or_new_binding(skb, IS_IPV4(&pkt), pkt.nexthdr, do_new,
+    ret = egress_lookup_or_new_binding(skb, PKT_IS_IPV4(), pkt.nexthdr, do_new,
                                        &pkt.tuple, &b_value, &b_value_rev);
     if (ret == TC_ACT_UNSPEC) {
         goto check_hairpin;
@@ -1800,7 +1859,7 @@ int egress_snat(struct __sk_buff *skb) {
 
     if (!b_value->is_static) {
         struct map_ct_value *ct_value;
-        ret = egress_lookup_or_new_ct(skb->ifindex, IS_IPV4(&pkt), pkt.nexthdr,
+        ret = egress_lookup_or_new_ct(skb->ifindex, PKT_IS_IPV4(), pkt.nexthdr,
                                       do_new, &pkt.tuple, b_value, b_value_rev,
                                       &ct_value);
         if (ret == LK_CT_NONE || ret == LK_CT_ERROR_NEW) {
@@ -1813,8 +1872,8 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     // modify source
-    ret = modify_headers(skb, IS_IPV4(&pkt), is_icmpx_error, pkt.nexthdr,
-                         TC_SKB_L3_OFF, pkt.l4_off, pkt.err_l4_off, true,
+    ret = modify_headers(skb, PKT_IS_IPV4(), is_icmpx_error, pkt.nexthdr,
+                         TC_SKB_L3_OFF(), pkt.l4_off, pkt.err_l4_off, true,
                          &pkt.tuple.saddr, pkt.tuple.sport, &b_value->to_addr,
                          b_value->to_port);
     if (ret) {
@@ -1827,23 +1886,27 @@ check_hairpin:
         return TC_ACT_UNSPEC;
     }
 
-    void *data_end = ctx_data_end(skb);
-    struct ethhdr *eth = ctx_data(skb);
-    if ((void *)(eth + 1) > data_end) {
-        return TC_ACT_SHOT;
-    }
-    // somehow "%pM" does not work in BPF
-    bpf_log_trace("hairpin smac: %x:%x:%x:%x:%x:%x", eth->h_source[0],
-                  eth->h_source[1], eth->h_source[2], eth->h_source[3],
-                  eth->h_source[4], eth->h_source[5]);
-    bpf_log_trace("hairpin dmac: %x:%x:%x:%x:%x:%x", eth->h_dest[0],
-                  eth->h_dest[1], eth->h_dest[2], eth->h_dest[3],
-                  eth->h_dest[4], eth->h_dest[5]);
+    if (HAS_ETH_ENCAP) {
+        void *data_end = ctx_data_end(skb);
+        struct ethhdr *eth = ctx_data(skb);
+        if ((void *)(eth + 1) > data_end) {
+            return TC_ACT_SHOT;
+        }
+        // somehow printk MAC format token "%pM" does not work in BPF
+        bpf_log_trace("hairpin smac: %x:%x:%x:%x:%x:%x", eth->h_source[0],
+                      eth->h_source[1], eth->h_source[2], eth->h_source[3],
+                      eth->h_source[4], eth->h_source[5]);
+        bpf_log_trace("hairpin dmac: %x:%x:%x:%x:%x:%x", eth->h_dest[0],
+                      eth->h_dest[1], eth->h_dest[2], eth->h_dest[3],
+                      eth->h_dest[4], eth->h_dest[5]);
 
-    u8 smac[6];
-    __builtin_memcpy(smac, eth->h_source, sizeof(smac));
-    __builtin_memcpy(eth->h_source, eth->h_dest, sizeof(smac));
-    __builtin_memcpy(eth->h_dest, smac, sizeof(smac));
+        u8 smac[6];
+        __builtin_memcpy(smac, eth->h_source, sizeof(smac));
+        __builtin_memcpy(eth->h_source, eth->h_dest, sizeof(smac));
+        __builtin_memcpy(eth->h_dest, smac, sizeof(smac));
+    } else {
+        bpf_log_trace("IP hairpin");
+    }
 
     return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 #undef BPF_LOG_TOPIC

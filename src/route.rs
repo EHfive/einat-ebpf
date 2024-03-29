@@ -12,7 +12,7 @@ use ipnet::Ipv6Net;
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_route::{
     address::AddressAttribute,
-    link::LinkAttribute,
+    link::{InfoKind, LinkAttribute, LinkInfo as AttrLinkInfo, LinkMessage},
     neighbour::{NeighbourMessage, NeighbourState},
     route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
     rule::{RuleAction, RuleAttribute, RuleMessage},
@@ -46,6 +46,17 @@ const fn nl_mgrp(group: u32) -> u32 {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PacketEncap {
+    BareIp,
+    Ethernet,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkInfo(LinkMessage);
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IfAddresses {
     pub ipv4: Vec<Ipv4Addr>,
@@ -58,11 +69,108 @@ pub struct RouteHelper {
     handle: Handle,
 }
 
+impl LinkInfo {
+    pub fn address(&self) -> Option<&Vec<u8>> {
+        self.0.attributes.iter().find_map(|attr| {
+            if let LinkAttribute::Address(addr) = attr {
+                Some(addr)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn kind(&self) -> Option<&InfoKind> {
+        let infos = self.0.attributes.iter().find_map(|attr| {
+            if let LinkAttribute::LinkInfo(addr) = attr {
+                Some(addr)
+            } else {
+                None
+            }
+        })?;
+        infos.iter().find_map(|attr| {
+            if let AttrLinkInfo::Kind(kind) = attr {
+                Some(kind)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn encap_from_kind(&self) -> PacketEncap {
+        use PacketEncap::*;
+        let Some(kind) = self.kind() else {
+            return Unknown;
+        };
+        // XXX: found out unknown encap type
+        match kind {
+            InfoKind::Dummy => Ethernet,
+            InfoKind::Ifb => Ethernet,
+            InfoKind::Bridge => Ethernet,
+            InfoKind::Tun => BareIp,
+            InfoKind::Nlmon => Unsupported,
+            InfoKind::Vlan => Ethernet,
+            InfoKind::Veth => Ethernet,
+            InfoKind::Vxlan => Ethernet,
+            InfoKind::Bond => Ethernet,
+            InfoKind::IpVlan => Ethernet,
+            InfoKind::MacVlan => Ethernet,
+            InfoKind::MacVtap => Ethernet,
+            InfoKind::GreTap => Unsupported,
+            InfoKind::GreTap6 => Unsupported,
+            // most tunnel has just bare IP
+            InfoKind::IpTun => BareIp,
+            InfoKind::SitTun => BareIp,
+            InfoKind::GreTun => Unsupported,
+            InfoKind::GreTun6 => Unsupported,
+            InfoKind::Vti => Unknown,
+            InfoKind::Vrf => Unknown,
+            InfoKind::Gtp => Unknown,
+            InfoKind::Ipoib => BareIp,
+            InfoKind::Wireguard => BareIp,
+            InfoKind::Xfrm => Unknown,
+            InfoKind::MacSec => Unknown,
+            InfoKind::Hsr => Unknown,
+            InfoKind::Other(_) => Unknown,
+            _ => Unknown,
+        }
+    }
+
+    pub fn encap(&self) -> PacketEncap {
+        let encap = self.encap_from_kind();
+        if !matches!(encap, PacketEncap::Unknown) {
+            return encap;
+        }
+
+        if self.address().is_some() {
+            PacketEncap::Ethernet
+        } else {
+            PacketEncap::Unknown
+        }
+    }
+}
+
 const ROUTE_LOCAL_TABLE_ID: u32 = 255;
 const LOCAL_RULE_PRIORITY: u32 = 200;
 const HAIRPIN_RULE_PRIORITY: u32 = 100;
 
 impl RouteHelper {
+    pub async fn query_link_info(&self, if_index: u32) -> Result<LinkInfo> {
+        let link = self
+            .handle
+            .link()
+            .get()
+            .match_index(if_index)
+            .execute()
+            .try_next()
+            .await?;
+        let Some(link) = link else {
+            return Err(anyhow::anyhow!("interface {} does not exist", if_index));
+        };
+
+        Ok(LinkInfo(link))
+    }
+
     pub async fn query_all_addresses(&self, if_index: u32) -> Result<IfAddresses> {
         let mut addresses = self
             .handle
@@ -441,34 +549,24 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         if let Some(ll_addr) = &self.cache_ll_addr {
             return Ok(ll_addr.clone());
         }
-        let external_link = self
-            .handle()
-            .link()
-            .get()
-            .match_index(self.external_if_index)
-            .execute()
-            .try_next()
+        let link = self
+            .rt_helper
+            .query_link_info(self.external_if_index)
             .await?;
-        let Some(external_link) = external_link else {
-            return Err(anyhow::anyhow!(
-                "external interface {} not exist",
-                self.external_if_index
-            ));
-        };
-        let ll_addr = external_link.attributes.into_iter().find_map(|attr| {
-            if let LinkAttribute::Address(addr) = attr {
-                Some(addr)
-            } else {
-                None
+
+        let ll_addr = if matches!(link.encap(), PacketEncap::Ethernet) {
+            let ll_addr = link.address().cloned();
+            if ll_addr.is_none() {
+                // Err: encap from link kind is Ethernet but has no address
+                eprintln!("no link address on if {}", self.external_if_index);
             }
-        });
-        if ll_addr.is_none() {
-            // No link address, could be a TUN device
-            eprintln!("no link address on if {}", self.external_if_index);
-        }
+            ll_addr
+        } else {
+            None
+        };
 
         self.cache_ll_addr = Some(ll_addr.clone());
-        Ok(ll_addr)
+        Ok(ll_addr.clone())
     }
 
     async fn reconfigure_dests_(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
@@ -598,6 +696,18 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
+    }
+
+    #[test]
+    fn get_link() {
+        new_async_rt().block_on(async {
+            let (_, rt_helper, _) = spawn_monitor().unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                rt_helper.query_link_info(1).await.unwrap();
+            })
+            .await
+            .unwrap();
+        });
     }
 
     #[test]
