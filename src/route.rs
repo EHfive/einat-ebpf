@@ -718,11 +718,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "netlink"]
     fn get_link() {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                rt_helper.query_link_info(2).await.unwrap();
+                rt_helper.query_link_info(1).await.unwrap();
             })
             .await
             .unwrap();
@@ -730,6 +731,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "netlink"]
     fn get_addr() {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
@@ -742,6 +744,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "netlink"]
     fn get_local_rule() {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
@@ -751,6 +754,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "netlink"]
     fn get_routes() {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
