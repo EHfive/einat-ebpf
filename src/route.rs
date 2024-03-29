@@ -12,7 +12,7 @@ use ipnet::Ipv6Net;
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_route::{
     address::AddressAttribute,
-    link::{InfoKind, LinkAttribute, LinkInfo as AttrLinkInfo, LinkMessage},
+    link::{InfoKind, LinkAttribute, LinkInfo as AttrLinkInfo, LinkLayerType, LinkMessage},
     neighbour::{NeighbourMessage, NeighbourState},
     route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
     rule::{RuleAction, RuleAttribute, RuleMessage},
@@ -97,6 +97,20 @@ impl LinkInfo {
         })
     }
 
+    fn encap_from_link_type(&self) -> PacketEncap {
+        use PacketEncap::*;
+        match self.0.header.link_layer_type {
+            LinkLayerType::Ether => Ethernet,
+            LinkLayerType::Loopback => Ethernet,
+            LinkLayerType::None => BareIp,
+            LinkLayerType::Ppp => BareIp,
+            LinkLayerType::Ipgre => Unsupported,
+            LinkLayerType::Ip6gre => Unsupported,
+            LinkLayerType::Netlink => Unsupported,
+            _ => Unknown,
+        }
+    }
+
     fn encap_from_kind(&self) -> PacketEncap {
         use PacketEncap::*;
         let Some(kind) = self.kind() else {
@@ -137,6 +151,11 @@ impl LinkInfo {
     }
 
     pub fn encap(&self) -> PacketEncap {
+        let encap = self.encap_from_link_type();
+        if !matches!(encap, PacketEncap::Unknown) {
+            return encap;
+        }
+
         let encap = self.encap_from_kind();
         if !matches!(encap, PacketEncap::Unknown) {
             return encap;
@@ -703,7 +722,7 @@ mod tests {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                rt_helper.query_link_info(1).await.unwrap();
+                rt_helper.query_link_info(2).await.unwrap();
             })
             .await
             .unwrap();
