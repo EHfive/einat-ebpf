@@ -1430,6 +1430,17 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
     if (!ct_value && !do_new) {
         return LK_CT_NONE;
     }
+
+    struct map_binding_key b_key_orig;
+    binding_value_to_key(ifindex, BINDING_ORIG_DIR_FLAG, l4proto, b_value,
+                         &b_key_orig);
+    struct map_binding_value *b_value_orig =
+        bpf_map_lookup_elem(&map_binding, &b_key_orig);
+    if (!b_value_orig || b_value_orig->seq != b_value->seq) {
+        // binding updated, just drop the packet
+        return LK_CT_ERROR_NEW;
+    }
+
     // TODO: use initialization helper to set or initialize ever fields
     // manually
     struct map_ct_value ct_value_new;
@@ -1454,6 +1465,8 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
     if (!ct_value) {
         return LK_CT_ERROR_NEW;
     }
+
+    b_value_orig->ref = BINDING_ORIG_REF_COUNTED;
     __sync_fetch_and_add(&b_value->ref, 1);
 
     bpf_log_debug("insert new CT");
@@ -1503,6 +1516,10 @@ static __always_inline int egress_lookup_or_new_ct(
             return LK_CT_ERROR_NEW;
         }
     }
+    if (b_value_rev->seq != b_value->seq) {
+        // binding updated, just drop the packet
+        return LK_CT_ERROR_NEW;
+    }
 
     struct map_ct_value ct_value_new = {.flags = is_ipv4 ? ADDR_IPV4_FLAG
                                                          : ADDR_IPV6_FLAG,
@@ -1516,6 +1533,7 @@ static __always_inline int egress_lookup_or_new_ct(
 
     __sync_fetch_and_add(&b_value_rev->ref, 1);
     __sync_fetch_and_add(&b_value_rev->use, 1);
+    b_value->ref = BINDING_ORIG_REF_COUNTED;
 
     bpf_log_debug("insert new CT");
 

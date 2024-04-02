@@ -195,6 +195,11 @@ struct map_binding_value {
     u32 seq;
 };
 
+// Set ref of orig dir binding to this to indicate the binding was ref counted
+// by at least one CT so it can be deleted in timer callback, otherwise the ref
+// is 0 and the binding is subject to be reused in find_port_cb
+#define BINDING_ORIG_REF_COUNTED ((u32)-1)
+
 struct map_ct_key {
     u32 ifindex;
     u8 flags;
