@@ -1089,29 +1089,12 @@ struct find_port_ctx {
     bool found;
 };
 
-static __always_inline bool is_binding_unused(struct map_binding_key *key,
-                                              struct map_binding_value *val,
-                                              bool is_rev_dir) {
-    if (is_rev_dir) {
-        return val->ref == 0;
-    }
-
-    struct map_binding_key key_rev;
-    binding_value_to_key(key->ifindex, 0, key->l4proto, val, &key_rev);
-
-    struct map_binding_value *val_rev =
-        bpf_map_lookup_elem(&map_binding, &key_rev);
-
-    return val_rev && val_rev->ref == 0;
-}
-
-static __always_inline int find_port_cb_(u32 index, struct find_port_ctx *ctx,
-                                         bool is_outbound) {
+static int find_port_cb(u32 index, struct find_port_ctx *ctx) {
 #define BPF_LOG_TOPIC "find_binding_port"
     ctx->key.from_port = bpf_htons(ctx->curr_port);
     struct map_binding_value *value =
         bpf_map_lookup_elem(&map_binding, &ctx->key);
-    if (!value || is_binding_unused(&ctx->key, value, is_outbound)) {
+    if (!value || value->ref == 0) {
         ctx->found = true;
         return BPF_LOOP_RET_BREAK;
     }
@@ -1129,16 +1112,7 @@ static __always_inline int find_port_cb_(u32 index, struct find_port_ctx *ctx,
 #undef BPF_LOG_TOPIC
 }
 
-static int ingress_find_port_cb(u32 index, struct find_port_ctx *ctx) {
-    return find_port_cb_(index, ctx, false);
-}
-
-static int egress_find_port_cb(u32 index, struct find_port_ctx *ctx) {
-    return find_port_cb_(index, ctx, true);
-}
-
-static __always_inline void find_port_fallback(struct find_port_ctx *ctx,
-                                               bool is_rev_dir) {
+static __always_inline void find_port_fallback(struct find_port_ctx *ctx) {
 #define BPF_LOG_TOPIC "find_port_fallback"
     // Try random port lookup for 32 times, and the packet would be dropped if
     // no success. However the subsequent packets would still enter this
@@ -1149,7 +1123,7 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx,
         ctx->key.from_port = bpf_htons(ctx->curr_port);
         struct map_binding_value *value =
             bpf_map_lookup_elem(&map_binding, &ctx->key);
-        if (!value || is_binding_unused(&ctx->key, value, is_rev_dir)) {
+        if (!value || value->ref == 0) {
             ctx->found = true;
             break;
         }
@@ -1161,7 +1135,7 @@ static __always_inline void find_port_fallback(struct find_port_ctx *ctx,
 }
 
 static int __always_inline fill_unique_binding_port(
-    bool is_outbound, struct port_range *proto_range, u8 range_len,
+    struct port_range *proto_range, u8 range_len,
     const struct map_binding_key *key, struct map_binding_value *val) {
 #define BPF_LOG_TOPIC "find_binding_port"
     struct find_port_ctx ctx;
@@ -1197,11 +1171,9 @@ static int __always_inline fill_unique_binding_port(
 
         if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_loop)) {
             // requires Linux kernel>=5.17
-            bpf_loop(65536,
-                     is_outbound ? egress_find_port_cb : ingress_find_port_cb,
-                     &ctx, 0);
+            bpf_loop(65536, find_port_cb, &ctx, 0);
         } else {
-            find_port_fallback(&ctx, is_outbound);
+            find_port_fallback(&ctx);
         }
 
         if (ctx.found) {
@@ -1262,8 +1234,8 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
             return TC_ACT_UNSPEC;
         }
 
-        int ret = fill_unique_binding_port(false, proto_range, range_len,
-                                           &b_key, &b_value_new);
+        int ret = fill_unique_binding_port(proto_range, range_len, &b_key,
+                                           &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
         }
@@ -1398,7 +1370,7 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
             return TC_ACT_UNSPEC;
         }
 
-        ret = fill_unique_binding_port(true, proto_range, range_len, &b_key,
+        ret = fill_unique_binding_port(proto_range, range_len, &b_key,
                                        &b_value_new);
         if (ret != TC_ACT_OK) {
             return TC_ACT_SHOT;
