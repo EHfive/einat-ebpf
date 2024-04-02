@@ -16,6 +16,7 @@ strip = true
 
 [features]
 default = []
+# Enable IPv6 NAPT
 ipv6 = []
 # Required on 32-bit platforms
 bindgen = ["libbpf-sys/bindgen"]
@@ -36,8 +37,8 @@ futures-util = { version = "0.3.30", default-features = false, features = [
 ] }
 ipnet = { version = "2.9.0", features = ["serde"] }
 lexopt = "0.3.0"
-libbpf-rs = "0.22.0"
-libbpf-sys = "1.2.1"
+libbpf-rs = "0.22.1"
+libbpf-sys = "1.4.0"
 libc = "0.2.151"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
@@ -50,11 +51,10 @@ tokio = { version = "1.35.1", features = ["macros", "rt", "signal", "sync"] }
 toml = { version = "0.8.10", default-features = false, features = ["parse"] }
 
 [target.'cfg(not(target_arch="x86_64"))'.dependencies]
-libbpf-sys = { version = "1.2.1", features = ["bindgen"] }
+libbpf-sys = { version = "1.4.0", features = ["bindgen"] }
 
 [build-dependencies]
 libbpf-cargo = "0.22.0"
 
 [patch.crates-io]
-libbpf-rs = { version = "0.22.0", git = "https://github.com/libbpf/libbpf-rs.git" }
-libbpf-sys = { version = "1.2.1", git = "https://github.com/EHfive/libbpf-sys.git", branch = "write-bindgen-to-out-dir" }
+libbpf-rs = { version = "0.22.1", git = "https://github.com/libbpf/libbpf-rs.git" }
