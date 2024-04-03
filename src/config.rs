@@ -129,6 +129,7 @@ pub struct ConfigHairpinRoute {
     pub ip_protocols: Vec<IpProtocol>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 pub struct ConfigNetIf {
     #[serde(flatten)]
@@ -161,7 +162,6 @@ pub struct ConfigNetIf {
     pub externals: Vec<ConfigExternal>,
     #[serde(default)]
     pub ipv4_hairpin_route: ConfigHairpinRoute,
-    #[cfg(feature = "ipv6")]
     #[serde(default)]
     pub ipv6_hairpin_route: ConfigHairpinRoute,
 }

@@ -80,8 +80,6 @@
 #define BPF_LOOP_RET_CONTINUE 0
 #define BPF_LOOP_RET_BREAK 1
 
-#define TC_SKB_L3_OFF (sizeof(struct ethhdr))
-
 union u_inet_addr {
 #ifdef FEAT_IPV6
     __u32 all[4];

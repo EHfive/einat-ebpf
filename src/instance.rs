@@ -29,6 +29,12 @@ use crate::utils::{IpNetwork, MapChange, PrefixMapDiff};
 struct ConstConfig {
     log_level: Option<u8>,
     has_eth_encap: Option<bool>,
+    ingress_ipv4: Option<bool>,
+    egress_ipv4: Option<bool>,
+    #[cfg(feature = "ipv6")]
+    ingress_ipv6: Option<bool>,
+    #[cfg(feature = "ipv6")]
+    egress_ipv6: Option<bool>,
     enable_fib_lookup_src: Option<bool>,
     allow_inbound_icmpx: Option<bool>,
     timeout_fragment: Option<u64>,
@@ -95,6 +101,20 @@ impl ConstConfig {
         }
         if let Some(has_eth_encap) = self.has_eth_encap {
             rodata.HAS_ETH_ENCAP = has_eth_encap as _;
+        }
+        if let Some(ingress_ipv4) = self.ingress_ipv4 {
+            rodata.INGRESS_IPV4 = ingress_ipv4 as _;
+        }
+        if let Some(egress_ipv4) = self.egress_ipv4 {
+            rodata.EGRESS_IPV4 = egress_ipv4 as _;
+        }
+        #[cfg(feature = "ipv6")]
+        if let Some(ingress_ipv6) = self.ingress_ipv6 {
+            rodata.INGRESS_IPV6 = ingress_ipv6 as _;
+        }
+        #[cfg(feature = "ipv6")]
+        if let Some(egress_ipv6) = self.egress_ipv6 {
+            rodata.EGRESS_IPV6 = egress_ipv6 as _;
         }
         if let Some(enable_fib_lookup_src) = self.enable_fib_lookup_src {
             rodata.ENABLE_FIB_LOOKUP_SRC = enable_fib_lookup_src as _;
@@ -647,10 +667,20 @@ impl InstanceConfig {
             }
         };
 
+        let nat44 = if_config.nat44;
+        let nat66 = cfg!(feature = "ipv6") && if_config.nat66;
+        let nat64 = false;
+
         let const_config = ConstConfig {
             // defaults to disable logging
             log_level: Some(if_config.bpf_log_level.unwrap_or(0).min(5)),
             has_eth_encap: Some(has_eth_encap),
+            ingress_ipv4: Some(nat44 || nat64),
+            egress_ipv4: Some(nat44),
+            #[cfg(feature = "ipv6")]
+            ingress_ipv6: Some(nat66),
+            #[cfg(feature = "ipv6")]
+            egress_ipv6: Some(nat66 || nat64),
             enable_fib_lookup_src: if_config.bpf_fib_lookup_external,
             allow_inbound_icmpx: if_config.allow_inbound_icmpx,
             timeout_fragment: if_config.timeout_fragment.map(Into::into),
@@ -662,11 +692,11 @@ impl InstanceConfig {
 
         let mut default_externals = Vec::new();
         if if_config.default_externals {
-            if if_config.nat44 {
-                default_externals.push(ConfigExternal::match_any_ipv4())
+            if nat44 {
+                default_externals.push(ConfigExternal::match_any_ipv4());
             }
-            if if_config.nat66 {
-                default_externals.push(ConfigExternal::match_any_ipv6())
+            if nat66 {
+                default_externals.push(ConfigExternal::match_any_ipv6());
             }
         }
         let externals = if_config

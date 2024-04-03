@@ -11,6 +11,13 @@ const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
 // Bare IP packet if false
 const volatile u8 HAS_ETH_ENCAP = true;
 
+const volatile u8 INGRESS_IPV4 = true;
+const volatile u8 EGRESS_IPV4 = true;
+#ifdef FEAT_IPV6
+const volatile u8 INGRESS_IPV6 = true;
+const volatile u8 EGRESS_IPV6 = true;
+#endif
+
 // Lookup external source address from FIB instead of using
 // g_ipv4_external_addr, requires Linux kernel>=6.7
 const volatile u8 ENABLE_FIB_LOOKUP_SRC = false;
@@ -1726,6 +1733,17 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
         return ret;
     }
 
+#ifdef FEAT_IPV6
+    barrier_var(is_ipv4);
+    if (is_ipv4 && !INGRESS_IPV4 || !is_ipv4 && !INGRESS_IPV6) {
+        return TC_ACT_UNSPEC;
+    }
+#else
+    if (!INGRESS_IPV4) {
+        return TC_ACT_UNSPEC;
+    }
+#endif
+
     // XXX: just use local variables instead
     struct packet_info pkt;
     ret = parse_packet(skb, PKT_IS_IPV4(), TC_SKB_L3_OFF(), &pkt);
@@ -1809,6 +1827,17 @@ int egress_snat(struct __sk_buff *skb) {
     if (ret != TC_ACT_OK) {
         return ret;
     }
+
+#ifdef FEAT_IPV6
+    barrier_var(is_ipv4);
+    if (is_ipv4 && !EGRESS_IPV4 || !is_ipv4 && !EGRESS_IPV6) {
+        return TC_ACT_UNSPEC;
+    }
+#else
+    if (!EGRESS_IPV4) {
+        return TC_ACT_UNSPEC;
+    }
+#endif
 
     // XXX: just use local variables instead
     struct packet_info pkt;
