@@ -21,7 +21,7 @@ fn main() {
 
     SkeletonBuilder::new()
         .source(SRC)
-        .clang_args(c_args.join(" "))
+        .clang_args(c_args)
         .debug(true)
         .build_and_generate(&out)
         .unwrap();
