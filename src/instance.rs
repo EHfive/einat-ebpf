@@ -15,6 +15,7 @@ use ipnet::{IpNet, Ipv4Net};
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{MapFlags, TcHook, TcHookBuilder, TC_EGRESS, TC_INGRESS};
 use prefix_trie::{Prefix, PrefixMap, PrefixSet};
+use tracing::{debug, info, warn};
 
 use crate::config::{AddressOrMatcher, ConfigDefaults, ConfigExternal, ConfigNetIf, ProtoRange};
 use crate::route::{IfAddresses, PacketEncap};
@@ -434,13 +435,13 @@ trait RuntimeConfig {
             let map_dest_config = Self::skel_map_dest_config(&maps);
             match change {
                 MapChange::Insert(k, v) | MapChange::Update(k, v) => {
-                    eprintln!("insert/update dest {:?}", k);
+                    debug!("update dest config of {:?}", k);
                     Self::with_lpm_key_bytes(*k, |k| {
                         map_dest_config.update(k, bytemuck::bytes_of(v), MapFlags::ANY)
                     })?;
                 }
                 MapChange::Delete(k) => {
-                    eprintln!("delete dest {:?}", k);
+                    debug!("delete dest config of {:?}", k);
                     Self::with_lpm_key_bytes(*k, |k| map_dest_config.delete(k))?;
                 }
             }
@@ -450,7 +451,7 @@ trait RuntimeConfig {
         let handle_external_change = |skel: &mut FullConeNatSkel, change| -> Result<()> {
             match change {
                 MapChange::Insert(k, v) => {
-                    eprintln!("insert external {:?}", k);
+                    debug!("insert external config of {:?}", k);
 
                     let maps = skel.maps();
                     let map_ext_config = Self::skel_map_external_config(&maps);
@@ -459,7 +460,7 @@ trait RuntimeConfig {
                     })?;
                 }
                 MapChange::Update(k, v) => {
-                    eprintln!("update external {:?}", k);
+                    debug!("update external config of {:?}", k);
 
                     with_skel_deleting(skel, |skel| -> Result<()> {
                         remove_binding_and_ct_entires(skel, k.ip_addr())?;
@@ -474,7 +475,7 @@ trait RuntimeConfig {
                     })?;
                 }
                 MapChange::Delete(k) => {
-                    eprintln!("delete external {:?}", k);
+                    debug!("delete external config of {:?}", k);
 
                     with_skel_deleting(skel, |skel| -> Result<()> {
                         let maps = skel.maps();
@@ -555,8 +556,13 @@ impl RuntimeConfig for RuntimeV4Config {
     }
 
     fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
-        eprintln!("setting external address {:?}", self.external_addr);
-        skel.data_mut().g_ipv4_external_addr = bytemuck::cast(self.external_addr.addr().octets());
+        let addr = self.external_addr.addr();
+        if addr.is_unspecified() {
+            info!("no default external IPv4 address set, NAT44 disabled");
+        } else {
+            info!("setting default external IPv4 address {}", addr);
+        }
+        skel.data_mut().g_ipv4_external_addr = bytemuck::cast(addr.octets());
     }
 
     fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
@@ -599,8 +605,13 @@ impl RuntimeConfig for RuntimeV6Config {
     }
 
     fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
-        eprintln!("setting external address {:?}", self.external_addr);
-        skel.data_mut().g_ipv6_external_addr = bytemuck::cast(self.external_addr.addr().octets());
+        let addr = self.external_addr.addr();
+        if addr.is_unspecified() {
+            info!("no default external IPv6 address set, NAT66 disabled");
+        } else {
+            info!("setting default external IPv6 address {}", addr);
+        }
+        skel.data_mut().g_ipv6_external_addr = bytemuck::cast(addr.octets());
     }
 
     fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
@@ -662,7 +673,10 @@ impl InstanceConfig {
                 ))
             }
             PacketEncap::Unknown => {
-                eprintln!("unknown interface packet encapsulation, fallback to no encap");
+                warn!(
+                    "unknown interface packet encapsulation type for if {}, fallback to no encap",
+                    if_index
+                );
                 false
             }
         };
@@ -762,9 +776,7 @@ impl InstanceConfig {
     }
 
     pub fn load(self) -> Result<Instance> {
-        let mut skel_builder = FullConeNatSkelBuilder::default();
-
-        skel_builder.obj_builder.debug(true);
+        let skel_builder = FullConeNatSkelBuilder::default();
 
         let mut open_skel = skel_builder.open()?;
 
@@ -772,7 +784,7 @@ impl InstanceConfig {
 
         let start = Instant::now();
         let mut skel = open_skel.load()?;
-        eprintln!("eBPF programs loaded in {:?}", start.elapsed());
+        info!("eBPF programs loaded in {:?}", start.elapsed());
 
         self.runtime_v4_config.apply(None, &mut skel)?;
         #[cfg(feature = "ipv6")]

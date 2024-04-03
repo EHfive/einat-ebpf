@@ -21,6 +21,7 @@ use netlink_packet_route::{
 use netlink_sys::{AsyncSocket, SocketAddr};
 use rtnetlink::{new_connection, Handle, IpVersion, NeighbourAddRequest, RouteAddRequest};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::config::IpProtocol;
 use crate::utils::IpNetwork;
@@ -289,7 +290,6 @@ impl RouteHelper {
             if !route_err_is_exist(&e) {
                 return Err(anyhow::anyhow!(e));
             }
-            eprintln!("exist");
         }
 
         for (rule, priority) in local_rules {
@@ -519,7 +519,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
                 .any(|describer| describer.matches(&route))
             {
                 if let Err(e) = self.handle().route().del(route).execute().await {
-                    eprintln!("failed to delete route: {}", e);
+                    warn!("failed to delete route: {}", e);
                 }
             }
         }
@@ -527,7 +527,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
         for neigh in core::mem::take(&mut self.neighs) {
             if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
-                eprintln!("failed to delete neigh entry: {}", e);
+                warn!("failed to delete neigh entry: {}", e);
             }
         }
 
@@ -537,13 +537,14 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
     }
 
     async fn add_rule(&mut self, iif_name: &str, ip_protocol: RouteIpProtocol) -> Result<()> {
+        let pref = HAIRPIN_RULE_PRIORITY;
         let mut req = self
             .handle()
             .rule()
             .add()
             .input_interface(iif_name.to_string())
             .table_id(self.table_id)
-            .priority(HAIRPIN_RULE_PRIORITY)
+            .priority(pref)
             .action(RuleAction::ToTable);
         req.message_mut().header.family = N::FAMILY;
         req.message_mut()
@@ -557,6 +558,10 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             if !route_err_is_exist(&e) {
                 return Err(anyhow::anyhow!(e));
             }
+            warn!(
+                "overwriting existing IP route rule, from iif {} lookup {} pref {}",
+                &iif_name, self.table_id, pref
+            );
         }
 
         self.rules.push(rule);
@@ -576,8 +581,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         let ll_addr = if matches!(link.encap(), PacketEncap::Ethernet) {
             let ll_addr = link.address().cloned();
             if ll_addr.is_none() {
-                // Err: encap from link kind is Ethernet but has no address
-                eprintln!("no link address on if {}", self.external_if_index);
+                warn!("no link address on if {}", self.external_if_index);
             }
             ll_addr
         } else {

@@ -49,6 +49,12 @@ rtnetlink = "0.14.1"
 serde = { version = "1.0.197", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["macros", "rt", "signal", "sync"] }
 toml = { version = "0.8.12", default-features = false, features = ["parse"] }
+tracing = { version = "0.1.40", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+    "std",
+    "fmt",
+    "ansi",
+] }
 
 [target.'cfg(not(target_arch="x86_64"))'.dependencies]
 libbpf-sys = { version = "1.4.0", features = ["bindgen"] }

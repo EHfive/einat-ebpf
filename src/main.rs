@@ -16,6 +16,7 @@ use ipnet::Ipv4Net;
 use ipnet::Ipv6Net;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinHandle;
+use tracing::{debug, error, info, span, warn};
 
 use config::{Config, ConfigNetIf, NetIfId};
 use instance::Instance;
@@ -188,7 +189,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                 .await;
             match res {
                 Ok(()) => ctx.v4_hairpin_routing = Some(hairpin_routing),
-                Err(e) => eprintln!("failed to configure IPv4 hairpin routing: {}", e),
+                Err(e) => warn!("failed to configure IPv4 hairpin routing: {}", e),
             }
         }
 
@@ -214,7 +215,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                     .await;
                 match res {
                     Ok(()) => ctx.v6_hairpin_routing = Some(hairpin_routing),
-                    Err(e) => eprintln!("failed to configure IPv6 hairpin routing: {}", e),
+                    Err(e) => warn!("failed to configure IPv6 hairpin routing: {}", e),
                 }
             }
         }
@@ -235,7 +236,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
             if let Some(ctx) = contexts.get_mut(&if_index) {
                 let new_addresses = ctx.rt_helper.query_all_addresses(if_index).await?;
                 if new_addresses.ipv4 != ctx.addresses.ipv4 {
-                    eprintln!(
+                    debug!(
                         "IPv4 addresses {:?} -> {:?}",
                         ctx.addresses.ipv4, new_addresses.ipv4
                     );
@@ -244,7 +245,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                 }
                 #[cfg(feature = "ipv6")]
                 if new_addresses.ipv6 != ctx.addresses.ipv6 {
-                    eprintln!(
+                    debug!(
                         "IPv6 addresses {:?} -> {:?}",
                         ctx.addresses.ipv6, new_addresses.ipv6
                     );
@@ -257,7 +258,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                         .reconfigure_dests(ctx.inst.v4_hairpin_dests())
                         .await
                     {
-                        eprintln!("failed to reconfigure IPv4 hairpin routing: {}", e);
+                        error!("failed to reconfigure IPv4 hairpin routing: {}", e);
                     }
                 }
 
@@ -267,7 +268,7 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
                         .reconfigure_dests(ctx.inst.v6_hairpin_dests())
                         .await
                     {
-                        eprintln!("failed to reconfigure IPv6 hairpin routing: {}", e);
+                        error!("failed to reconfigure IPv6 hairpin routing: {}", e);
                     }
                 }
             }
@@ -301,7 +302,7 @@ async fn daemon_guard(config: &Config) -> Result<()> {
 
     for ctx in contexts.values_mut() {
         if let Err(e) = ctx.detach().await {
-            eprintln!("failed to cleanup context: {}", e);
+            error!("failed to cleanup context: {}", e);
         };
     }
 
@@ -309,7 +310,29 @@ async fn daemon_guard(config: &Config) -> Result<()> {
     Ok(())
 }
 
+fn tracing_init() -> Result<()> {
+    use libbpf_rs::PrintLevel;
+
+    tracing_subscriber::fmt::init();
+
+    libbpf_rs::set_print(Some((PrintLevel::Debug, |level, msg| {
+        let span = span!(tracing::Level::DEBUG, "libbpf");
+        let _enter = span.enter();
+
+        let msg = msg.trim_end_matches('\n');
+        match level {
+            PrintLevel::Info => info!("{}", msg),
+            PrintLevel::Warn => warn!("{}", msg),
+            PrintLevel::Debug => debug!("{}", msg),
+        }
+    })));
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
+    tracing_init()?;
+
     let args = parse_env_args()?;
 
     let mut config: Config = if let Some(config_path) = args.config_file {
