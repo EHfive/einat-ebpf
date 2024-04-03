@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
+use std::cmp::Ordering;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, Ipv4Addr};
@@ -171,8 +172,6 @@ impl LinkInfo {
 }
 
 const ROUTE_LOCAL_TABLE_ID: u32 = 255;
-const LOCAL_RULE_PRIORITY: u32 = 200;
-const HAIRPIN_RULE_PRIORITY: u32 = 100;
 
 impl RouteHelper {
     pub async fn query_link_info(&self, if_index: u32) -> Result<LinkInfo> {
@@ -259,43 +258,44 @@ impl RouteHelper {
         Ok(res)
     }
 
-    async fn deprioritize_local_ip_rule(&self, is_ipv4: bool) -> Result<()> {
-        let local_rules = self.local_ip_rules(is_ipv4).await?;
-        if local_rules
-            .iter()
-            .all(|(_rule, priority)| *priority == LOCAL_RULE_PRIORITY)
-        {
-            return Ok(());
-        }
-
-        let mut add_local_rule = self
-            .handle
-            .rule()
-            .add()
-            .action(RuleAction::ToTable)
-            .table_id(ROUTE_LOCAL_TABLE_ID)
-            .priority(LOCAL_RULE_PRIORITY);
-
-        add_local_rule.message_mut().header.family = if is_ipv4 {
-            AddressFamily::Inet
-        } else {
-            AddressFamily::Inet6
-        };
-
-        // Add protocol=kernel to prevent it from being deleted by systemd-networkd
-        // in case `ManageForeignRoutingPolicyRules` was not disabled.
-        rule_set_protocol_kernel(add_local_rule.message_mut());
-
-        if let Err(e) = add_local_rule.execute().await {
-            if !route_err_is_exist(&e) {
-                return Err(anyhow::anyhow!(e));
+    async fn deprioritize_local_ip_rule(&self, is_ipv4: bool, new_priority: u32) -> Result<()> {
+        let mut to_delete = Vec::new();
+        let mut found_not_less = false;
+        for (rule, priority) in self.local_ip_rules(is_ipv4).await? {
+            match priority.cmp(&new_priority) {
+                Ordering::Less => to_delete.push(rule),
+                _ => found_not_less = true,
             }
         }
 
-        for (rule, priority) in local_rules {
-            if priority < LOCAL_RULE_PRIORITY {
-                self.handle.rule().del(rule).execute().await?;
+        if !found_not_less {
+            let mut add_local_rule = self
+                .handle
+                .rule()
+                .add()
+                .action(RuleAction::ToTable)
+                .table_id(ROUTE_LOCAL_TABLE_ID)
+                .priority(new_priority);
+
+            add_local_rule.message_mut().header.family = if is_ipv4 {
+                AddressFamily::Inet
+            } else {
+                AddressFamily::Inet6
+            };
+
+            // Add protocol=kernel to prevent it from being deleted by systemd-networkd
+            // in case `ManageForeignRoutingPolicyRules` was not disabled.
+            rule_set_protocol_kernel(add_local_rule.message_mut());
+
+            if let Err(e) = add_local_rule.execute().await {
+                if !route_err_is_exist(&e) {
+                    return Err(anyhow::anyhow!(e));
+                }
             }
+        }
+
+        for rule in to_delete {
+            self.handle.rule().del(rule).execute().await?;
         }
 
         Ok(())
@@ -438,6 +438,8 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
     async fn configure_(
         &mut self,
+        ip_rule_pref: u32,
+        local_ip_rule_pref: u32,
         mut internal_if_names: Vec<String>,
         mut ip_protocols: Vec<IpProtocol>,
         hairpin_dests: Vec<N>,
@@ -449,14 +451,15 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         internal_if_names.dedup();
         if !internal_if_names.is_empty() {
             self.rt_helper
-                .deprioritize_local_ip_rule(N::IS_IPV4)
+                .deprioritize_local_ip_rule(N::IS_IPV4, local_ip_rule_pref)
                 .await?;
         }
 
         ip_protocols.dedup();
         for iif_name in internal_if_names {
             for &protocol in ip_protocols.iter() {
-                self.add_rule(&iif_name, protocol.into()).await?;
+                self.add_rule(&iif_name, protocol.into(), ip_rule_pref)
+                    .await?;
             }
         }
 
@@ -465,12 +468,20 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
     pub async fn configure(
         &mut self,
+        ip_rule_pref: u32,
+        local_ip_rule_pref: u32,
         internal_if_names: Vec<String>,
         ip_protocols: Vec<IpProtocol>,
         hairpin_dests: Vec<N>,
     ) -> Result<()> {
         let res = self
-            .configure_(internal_if_names, ip_protocols, hairpin_dests)
+            .configure_(
+                ip_rule_pref,
+                local_ip_rule_pref,
+                internal_if_names,
+                ip_protocols,
+                hairpin_dests,
+            )
             .await;
         if res.is_err() {
             let _ = self.deconfigure().await;
@@ -536,15 +547,19 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(())
     }
 
-    async fn add_rule(&mut self, iif_name: &str, ip_protocol: RouteIpProtocol) -> Result<()> {
-        let pref = HAIRPIN_RULE_PRIORITY;
+    async fn add_rule(
+        &mut self,
+        iif_name: &str,
+        ip_protocol: RouteIpProtocol,
+        priority: u32,
+    ) -> Result<()> {
         let mut req = self
             .handle()
             .rule()
             .add()
             .input_interface(iif_name.to_string())
             .table_id(self.table_id)
-            .priority(pref)
+            .priority(priority)
             .action(RuleAction::ToTable);
         req.message_mut().header.family = N::FAMILY;
         req.message_mut()
@@ -560,7 +575,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             }
             warn!(
                 "overwriting existing IP route rule, from iif {} lookup {} pref {}",
-                &iif_name, self.table_id, pref
+                &iif_name, self.table_id, priority
             );
         }
 

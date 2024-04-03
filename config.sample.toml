@@ -1,9 +1,22 @@
 [defaults]
+ipv4_local_rule_pref = 200
+ipv6_local_rule_pref = 200
+ipv4_hairpin_rule_pref = 100
+ipv6_hairpin_rule_pref = 100
+ipv4_hairpin_table_id = 4787
+ipv6_hairpin_table_id = 4787
+
 tcp_ranges = ["20000-29999"]
 udp_ranges = ["20000-29999"]
 icmp_ranges = ["0-65535"]
 icmp_in_ranges = ["0-9999"]
 icmp_out_ranges = ["1000-65535"]
+
+# Minimal NAT44 configuration with hairpin routing
+[[interfaces]]
+if_name = "eth0"
+nat44 = true
+ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
 # Interface name would be resolved to iterface index
@@ -44,11 +57,13 @@ internal_if_names = [
     # "internal"
 ]
 ip_protocols = ["tcp", "udp"]
+ip_rule_pref = 200
 table_id = 4787
 
 [interfaces.ipv6_hairpin_route]
 internal_if_names = []
 ip_protocols = ["tcp", "udp"]
+ip_rule_pref = 200
 table_id = 4787
 
 # The first static or matching address would be used as NAT external address.
@@ -56,7 +71,7 @@ table_id = 4787
 address = "192.168.4.2"
 no_snat = false
 no_hairpin = false
-# Defaults to ranges in [defaults] if not secified.
+# Defaults to ranges in [common] if not secified.
 #tcp_ranges = ["10000-65535"]
 #udp_ranges = ["10000-65535"]
 #icmp_ranges = ["0-65535"]
@@ -70,11 +85,5 @@ no_hairpin = false
 [[interfaces.externals]]
 match_address = "192.168.4.0/24"
 
-# Minimal interface confiuration with hairpin routing
-[[interfaces]]
-if_name = "eth0"
-nat44 = true
-
-ipv4_hairpin_route.internal_if_names = [
-    "lo", "internal"
-]
+[[interfaces.externals]]
+match_address = { start = "192.168.4.1", end = "192.168.4.254" }

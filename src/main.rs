@@ -114,8 +114,6 @@ impl IfContext {
     }
 }
 
-const DEFAULT_HAIRPIN_TABLE_ID: u32 = 4787;
-
 async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Result<JoinHandle<()>> {
     let (monitor_task, rt_helper, events) = route::spawn_monitor()?;
 
@@ -173,15 +171,29 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
         let enable = hairpin_config.enable == Some(true)
             || hairpin_config.enable != Some(false) && !internal_if_names.is_empty();
         if enable {
+            let ip_rule_pref = hairpin_config
+                .ip_rule_pref
+                .unwrap_or(config.defaults.ipv4_hairpin_rule_pref);
+            let local_ip_rule_pref = config.defaults.ipv4_local_rule_pref;
+            if ip_rule_pref >= local_ip_rule_pref {
+                return Err(anyhow::anyhow!(
+                    "Hairpin IPv4 route rule priority {} is not less than local IP rule priority {}",
+                    ip_rule_pref,
+                    local_ip_rule_pref,
+                ));
+            }
+
             let table_id = hairpin_config
                 .table_id
-                .map(|num| num.get())
-                .unwrap_or(DEFAULT_HAIRPIN_TABLE_ID);
+                .unwrap_or(config.defaults.ipv4_hairpin_table_id)
+                .get();
             let mut hairpin_routing =
                 HairpinRouting::new(rt_helper.clone(), ctx.if_index, table_id);
 
             let res = hairpin_routing
                 .configure(
+                    ip_rule_pref,
+                    local_ip_rule_pref,
                     internal_if_names,
                     hairpin_config.ip_protocols.clone(),
                     ctx.inst.v4_hairpin_dests(),
@@ -200,14 +212,28 @@ async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Resu
             let enable = hairpin_config.enable == Some(true)
                 || hairpin_config.enable != Some(false) && !internal_if_names.is_empty();
             if enable {
+                let ip_rule_pref = hairpin_config
+                    .ip_rule_pref
+                    .unwrap_or(config.defaults.ipv6_hairpin_rule_pref);
+                let local_ip_rule_pref = config.defaults.ipv6_local_rule_pref;
+                if ip_rule_pref >= local_ip_rule_pref {
+                    return Err(anyhow::anyhow!(
+                        "Hairpin IPv6 route rule priority {} is not less than local IP rule priority {}",
+                        ip_rule_pref,
+                        local_ip_rule_pref,
+                    ));
+                }
+
                 let table_id = hairpin_config
                     .table_id
-                    .map(|num| num.get())
-                    .unwrap_or(DEFAULT_HAIRPIN_TABLE_ID);
+                    .unwrap_or(config.defaults.ipv6_hairpin_table_id)
+                    .get();
                 let mut hairpin_routing =
                     HairpinRouting::new(rt_helper.clone(), ctx.if_index, table_id);
                 let res = hairpin_routing
                     .configure(
+                        ip_rule_pref,
+                        local_ip_rule_pref,
                         internal_if_names,
                         hairpin_config.ip_protocols.clone(),
                         ctx.inst.v6_hairpin_dests(),

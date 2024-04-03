@@ -22,6 +22,12 @@ type ProtoRanges = Vec<ProtoRange>;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ConfigDefaults {
+    pub ipv4_local_rule_pref: u32,
+    pub ipv6_local_rule_pref: u32,
+    pub ipv4_hairpin_rule_pref: u32,
+    pub ipv6_hairpin_rule_pref: u32,
+    pub ipv4_hairpin_table_id: NonZeroU32,
+    pub ipv6_hairpin_table_id: NonZeroU32,
     pub tcp_ranges: ProtoRanges,
     pub udp_ranges: ProtoRanges,
     pub icmp_ranges: ProtoRanges,
@@ -123,6 +129,8 @@ pub struct ConfigHairpinRoute {
     pub enable: Option<bool>,
     #[serde(default)]
     pub internal_if_names: Vec<String>,
+    #[serde(default)]
+    pub ip_rule_pref: Option<u32>,
     #[serde(default)]
     pub table_id: Option<NonZeroU32>,
     #[serde(default = "default_ip_protocols")]
@@ -313,6 +321,12 @@ impl Default for ConfigDefaults {
             vec![ProtoRange { inner }]
         }
         Self {
+            ipv4_local_rule_pref: 200,
+            ipv6_local_rule_pref: 200,
+            ipv4_hairpin_rule_pref: 100,
+            ipv6_hairpin_rule_pref: 100,
+            ipv4_hairpin_table_id: NonZeroU32::new(4787).unwrap(),
+            ipv6_hairpin_table_id: NonZeroU32::new(4787).unwrap(),
             tcp_ranges: range(20000..=29999),
             udp_ranges: range(20000..=29999),
             icmp_ranges: range(0..=u16::MAX),
