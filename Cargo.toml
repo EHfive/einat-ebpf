@@ -1,9 +1,10 @@
 [package]
-name = "bpf-full-cone-nat"
+name = "einat"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-2.0"
 authors = ["Huang-Huang Bao <i@eh5.me>"]
+repository = "https://github.com/EHfive/einat-ebpf"
 rust-version = "1.74"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

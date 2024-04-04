@@ -59,8 +59,8 @@ ip netns exec router ip addr show
 ip netns exec router ip route show
 
 # start our program
-ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s1 --bpf-log 5 >/dev/null 2>&1 &
-ip netns exec router ./target/release/bpf-full-cone-nat -i veth_r_s2 >/dev/null 2>&1 &
+ip netns exec router ./target/debug/einat -i veth_r_s1 --bpf-log 5 >/dev/null 2>&1 &
+ip netns exec router ./target/debug/einat -i veth_r_s2 >/dev/null 2>&1 &
 sleep 1
 
 #

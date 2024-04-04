@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
-include!(concat!(env!("OUT_DIR"), "/full_cone_nat.skel.rs"));
+include!(concat!(env!("OUT_DIR"), "/einat.skel.rs"));
 
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;

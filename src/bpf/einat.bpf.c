@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "full_cone_nat.h"
+#include "einat.h"
 
 #define DEFAULT_FRAG_TRACK_MAX_ENTRIES 65536
 #define DEFAULT_BINDING_MAX_ENTRIES (65536 * 2)

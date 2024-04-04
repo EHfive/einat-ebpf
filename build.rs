@@ -3,12 +3,12 @@ use std::path::PathBuf;
 
 use libbpf_cargo::SkeletonBuilder;
 
-const SRC: &str = "src/bpf/full_cone_nat.bpf.c";
+const SRC: &str = "src/bpf/einat.bpf.c";
 
 fn main() {
     let mut out =
         PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set in build script"));
-    out.push("full_cone_nat.skel.rs");
+    out.push("einat.skel.rs");
 
     let mut c_args = vec![
         "-Wno-compare-distinct-pointer-types".to_string(),

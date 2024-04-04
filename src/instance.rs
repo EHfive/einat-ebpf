@@ -21,8 +21,8 @@ use crate::config::{AddressOrMatcher, ConfigDefaults, ConfigExternal, ConfigNetI
 use crate::route::{IfAddresses, PacketEncap};
 use crate::skel;
 use crate::skel::{
-    DestConfig as BpfDestConfig, DestFlags, ExternalConfig as BpfExternalConfig, ExternalFlags,
-    FullConeNatMaps, FullConeNatSkel, FullConeNatSkelBuilder, OpenFullConeNatSkel,
+    DestConfig as BpfDestConfig, DestFlags, EinatMaps, EinatSkel, EinatSkelBuilder,
+    ExternalConfig as BpfExternalConfig, ExternalFlags, OpenEinatSkel,
 };
 use crate::utils::{IpNetwork, MapChange, PrefixMapDiff};
 
@@ -89,13 +89,13 @@ pub struct InstanceConfig {
 
 pub struct Instance {
     config: InstanceConfig,
-    skel: FullConeNatSkel<'static>,
+    skel: EinatSkel<'static>,
     attached_ingress_hook: Option<TcHook>,
     attached_egress_hook: Option<TcHook>,
 }
 
 impl ConstConfig {
-    fn apply(&self, skel: &mut OpenFullConeNatSkel) {
+    fn apply(&self, skel: &mut OpenEinatSkel) {
         let rodata = skel.rodata_mut();
         if let Some(log_level) = self.log_level {
             rodata.LOG_LEVEL = log_level;
@@ -314,9 +314,9 @@ trait RuntimeConfig {
 
     fn with_lpm_key_bytes<R, F: FnOnce(&[u8]) -> R>(prefix: Self::Prefix, f: F) -> R;
 
-    fn apply_external_addr(&self, skel: &mut FullConeNatSkel);
-    fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map;
-    fn skel_map_external_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map;
+    fn apply_external_addr(&self, skel: &mut EinatSkel);
+    fn skel_map_dest_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map;
+    fn skel_map_external_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map;
 
     fn init(
         &mut self,
@@ -429,8 +429,8 @@ trait RuntimeConfig {
         res
     }
 
-    fn apply(&self, old: Option<&Self>, skel: &mut FullConeNatSkel) -> Result<()> {
-        let handle_dest_change = |skel: &mut FullConeNatSkel, change| -> Result<()> {
+    fn apply(&self, old: Option<&Self>, skel: &mut EinatSkel) -> Result<()> {
+        let handle_dest_change = |skel: &mut EinatSkel, change| -> Result<()> {
             let maps = skel.maps();
             let map_dest_config = Self::skel_map_dest_config(&maps);
             match change {
@@ -448,7 +448,7 @@ trait RuntimeConfig {
             Ok(())
         };
 
-        let handle_external_change = |skel: &mut FullConeNatSkel, change| -> Result<()> {
+        let handle_external_change = |skel: &mut EinatSkel, change| -> Result<()> {
             match change {
                 MapChange::Insert(k, v) => {
                     debug!("insert external config of {:?}", k);
@@ -555,7 +555,7 @@ impl RuntimeConfig for RuntimeV4Config {
         f(bytemuck::bytes_of(&key))
     }
 
-    fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
+    fn apply_external_addr(&self, skel: &mut EinatSkel) {
         let addr = self.external_addr.addr();
         if addr.is_unspecified() {
             info!("no default external IPv4 address set, NAT44 disabled");
@@ -565,11 +565,11 @@ impl RuntimeConfig for RuntimeV4Config {
         skel.data_mut().g_ipv4_external_addr = bytemuck::cast(addr.octets());
     }
 
-    fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
+    fn skel_map_dest_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map {
         maps.map_ipv4_dest_config()
     }
 
-    fn skel_map_external_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
+    fn skel_map_external_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map {
         maps.map_ipv4_external_config()
     }
 }
@@ -604,7 +604,7 @@ impl RuntimeConfig for RuntimeV6Config {
         f(bytemuck::bytes_of(&key))
     }
 
-    fn apply_external_addr(&self, skel: &mut FullConeNatSkel) {
+    fn apply_external_addr(&self, skel: &mut EinatSkel) {
         let addr = self.external_addr.addr();
         if addr.is_unspecified() {
             info!("no default external IPv6 address set, NAT66 disabled");
@@ -614,11 +614,11 @@ impl RuntimeConfig for RuntimeV6Config {
         skel.data_mut().g_ipv6_external_addr = bytemuck::cast(addr.octets());
     }
 
-    fn skel_map_dest_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
+    fn skel_map_dest_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map {
         maps.map_ipv6_dest_config()
     }
 
-    fn skel_map_external_config<'a>(maps: &'a FullConeNatMaps<'_>) -> &'a libbpf_rs::Map {
+    fn skel_map_external_config<'a>(maps: &'a EinatMaps<'_>) -> &'a libbpf_rs::Map {
         maps.map_ipv6_external_config()
     }
 }
@@ -776,7 +776,7 @@ impl InstanceConfig {
     }
 
     pub fn load(self) -> Result<Instance> {
-        let skel_builder = FullConeNatSkelBuilder::default();
+        let skel_builder = EinatSkelBuilder::default();
 
         let mut open_skel = skel_builder.open()?;
 
@@ -874,10 +874,7 @@ impl Instance {
     }
 }
 
-fn with_skel_deleting<T, F: FnOnce(&mut FullConeNatSkel) -> T>(
-    skel: &mut FullConeNatSkel,
-    f: F,
-) -> T {
+fn with_skel_deleting<T, F: FnOnce(&mut EinatSkel) -> T>(skel: &mut EinatSkel, f: F) -> T {
     skel.data_mut().g_deleting_map_entires = 1;
 
     // Wait for 1ms and expecting all previous BPF program calls
@@ -892,7 +889,7 @@ fn with_skel_deleting<T, F: FnOnce(&mut FullConeNatSkel) -> T>(
     res
 }
 
-fn remove_binding_and_ct_entires(skel: &FullConeNatSkel, external_addr: IpAddr) -> Result<()> {
+fn remove_binding_and_ct_entires(skel: &EinatSkel, external_addr: IpAddr) -> Result<()> {
     use skel::{BindingFlags, InetAddr, MapBindingKey, MapBindingValue, MapCtKey};
 
     let maps = skel.maps();

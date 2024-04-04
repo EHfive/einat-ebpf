@@ -23,10 +23,10 @@ use instance::Instance;
 use route::{HairpinRouting, IfAddresses, MonitorEvent, RouteHelper};
 
 const HELP: &str = "\
-BPF Full Cone NAT
+einat - An eBPF-based Endpoint-Independent NAT
 
 USAGE:
-  bpf-full-cone-nat [OPTIONS]
+  einat [OPTIONS]
 
 OPTIONS:
   -h, --help               Print this message

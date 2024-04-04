@@ -1,9 +1,6 @@
-> [!WARNING]
-> This application is currently under heavy development, do not use in production.
+# eBPF-based Endpoint-Independent NAT
 
-# eBPF Full Cone NAT
-
-This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation) on TC egress and ingress hooks.
+This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation) on TC egress and ingress hooks. It supports Endpoint-Independent NAT for IPv4/IPv6 TCP/UDP/ICMP.
 
 ## Requirement
 
@@ -13,28 +10,50 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 -   `clang` to compile BPF C code
 -   `cargo` and `rustfmt` for building
 
+It's also required the eBPF JIT implementation for target architecture in kernel has implemented support for BPF-to-BPF calls, which is not the case for MIPS and other architectures have less interests. This application is only tested to work on x86-64 or aarch64.
+
 ## Installation
 
 ```shell
-cargo install --git https://github.com/EHfive/bpf-full-cone-nat
+cargo install --git https://github.com/EHfive/einat-ebpf.git
 ```
 
-Or build static binaries with Nix flakes we provide.
+You can also enable IPv6 NAT66 feature with `--features ipv6` flag, however it would increase load time of eBPF programs to about 4 times.
+
+Or build static binaries with Nix flakes we provide, run `nix flake show` to list all available packages.
 
 ```shell
-nix build github:EHfive/bpf-full-cone-nat#static-x86_64-unknown-linux-musl
+nix build "github:EHfive/einat-ebpf#static-x86_64-unknown-linux-musl"
+nix build "github:EHfive/einat-ebpf#ipv6-static-x86_64-unknown-linux-musl"
 # Cross compile for aarch64
-nix build github:EHfive/bpf-full-cone-nat#static-aarch64-unknown-linux-musl
+nix build "github:EHfive/einat-ebpf#static-aarch64-unknown-linux-musl"
 ```
+
+See also [cross-compilation guide](./docs/guide/cross.md) for cross-compilation on Debian/Debian-based distros.
 
 ## Usage
 
-This application currently supports SNAT for IPv4 TCP/UDP/ICMP, see [config.sample.toml](./config.sample.toml) for more configuration options.
+```
+einat - An eBPF-based Endpoint-Independent NAT
+
+USAGE:
+  einat [OPTIONS]
+
+OPTIONS:
+  -h, --help               Print this message
+  -c, --config <file>      Path to configuration file
+  -i, --ifname             Network interface name, e.g. eth0
+      --ifindex            Network interface index number, e.g. 2
+      --nat44              Enable NAT44/NAPT44 for specified network interface
+      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 0, disabled
+```
+
+See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface. Also make sure nftables/iptables masquerading rule is not set.
 
 ```shell
-sudo bpf-full-cone-nat --config /path/to/config.toml
+sudo einat --config /path/to/config.toml
 # or with simplified CLI options
-sudo bpf-full-cone-nat --ifname eth0
+sudo einat --ifname eth0
 ```
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.

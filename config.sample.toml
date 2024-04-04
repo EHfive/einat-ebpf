@@ -19,26 +19,34 @@ nat44 = true
 ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
+# External or outbound interface on which NAT would be performed.
 # Interface name would be resolved to iterface index
 if_name = "eth0"
 # `if_index` would be prefered if both `if_name` and `if_index` are specified
 if_index = 2
+# Enable NAPT44
 nat44 = true
+# Enable NAPT66
 nat66 = false
-# View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
+# Set max BPF log level
 # 0: disable, 1: error, 2: warn, 3: info, 4: debug, 5: trace
+# View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
 bpf_log_level = 0
+# Enable external address(preferd source) lookup, recommand to enable.
+# Only works on Linux kernel>=6.7, it's a no-op for kernel on lower version.
 bpf_fib_lookup_external = false
 # Set this to `false` for early disabling inbound ICMP binding initiation,
 # similar to set `icmp_in_ranges = []`.
 allow_inbound_icmpx = true
-# See allowed time units in <https://github.com/fundu-rs/fundu/blob/fundu-v2.0.0/README.md#time-units>
+# NAT records lifetimes, see <https://datatracker.ietf.org/doc/html/rfc6146#section-4> .
+# See available time units in <https://github.com/fundu-rs/fundu/blob/fundu-v2.0.0/README.md#time-units> .
 timeout_fragment = "2s"
 timeout_pkt_min = "1m"
 timeout_pkt_default = "5m"
 timeout_tcp_trans = "4m"
 timeout_tcp_est = "124m"
 
+# Disable source nat for specified destination networks.
 no_snat_dests = [
     # "192.168.0.0/16"
 ]
@@ -56,34 +64,59 @@ internal_if_names = [
     # "lo",
     # "internal"
 ]
+# Hairpin IP protocols. You can also add "icmp" however it would be equivalent
+# to send packet back to sender due to "Endpoint-Independent Mapping" behavior
+# we have and ICMP does not distinguish between source query ID and detination
+# query ID, which is not very useful thus not included by default.
 ip_protocols = ["tcp", "udp"]
+# Defaults to `defaults.ipv4_local_rule_pref`.
 ip_rule_pref = 200
+# Defaults to `defaults.ipv4_hairpin_table_id`.
 table_id = 4787
 
 [interfaces.ipv6_hairpin_route]
+enable = false
 internal_if_names = []
 ip_protocols = ["tcp", "udp"]
+# Defaults to `defaults.ipv6_local_rule_pref`.
 ip_rule_pref = 200
+# Defaults to `defaults.ipv6_hairpin_table_id`.
 table_id = 4787
 
 # The first static or matching address would be used as NAT external address.
+# External config defined first has higher priority.
 [[interfaces.externals]]
+# Sepcify a static external address for NAT
 address = "192.168.4.2"
+# The address would not be used as NAT external address if this is `true`.
 no_snat = false
+# Disable hairpin the address.
 no_hairpin = false
-# Defaults to ranges in [common] if not secified.
+# Defaults to ranges in [defaults] if not secified.
 #tcp_ranges = ["10000-65535"]
 #udp_ranges = ["10000-65535"]
 #icmp_ranges = ["0-65535"]
 #icmp_in_ranges = ["0-9999"]
 #icmp_out_ranges = ["1000-65535"]
 
-# You can set ranges to empty `[]` to disable NAT for respective protocol,
-# e.g. disable NAT for TCP.
+# You can set ranges to empty `[]` to disable NAT for respective protocol.
+# For example disable NAT for TCP, you can than combine with Netfilter
+# masquerading for TCP to form a mixed NAT.
 #tcp_ranges = []
 
 [[interfaces.externals]]
+# Use `match_address` to match addresses on external interface sepcified.
+# Match a CIDR network
 match_address = "192.168.4.0/24"
+# This is equivalent to format above.
+match_address = { network = "192.168.4.0/24" }
+# Match an address range.
+match_address = { start = "192.168.4.100", end = "192.168.4.200" }
 
+# You might want to exculde some address from being selected as
+# NAT external address.
+# Example that exclude IPv6 link-local addresses.
 [[interfaces.externals]]
-match_address = { start = "192.168.4.1", end = "192.168.4.254" }
+match_address = "fe80::/10"
+no_snat = true
+no_hairpin = true
