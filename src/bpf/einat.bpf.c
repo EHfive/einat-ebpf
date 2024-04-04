@@ -49,7 +49,7 @@ __be32 g_ipv4_external_addr SEC(".data") = 0;
 __be32 g_ipv6_external_addr[4] SEC(".data") = {0};
 #endif
 
-u8 g_deleting_map_entires SEC(".data") = 0;
+u8 g_deleting_map_entries SEC(".data") = 0;
 
 u32 g_next_binding_seq = 0;
 
@@ -927,8 +927,8 @@ delete_ct:
 static int ct_timer_cb(void *_map_ct, struct map_ct_key *key,
                        struct map_ct_value *value) {
 #define BPF_LOG_TOPIC "ct_timer_cb"
-    if (g_deleting_map_entires) {
-        // delay the CT deletion till g_deleting_map_entires became false
+    if (g_deleting_map_entries) {
+        // delay the CT deletion till g_deleting_map_entries became false
         bpf_timer_start(&value->timer, 1e9, 0);
         return 0;
     }
@@ -1770,7 +1770,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
-    bool do_inbound_binding = ALLOW_INBOUND_ICMPX && !g_deleting_map_entires &&
+    bool do_inbound_binding = ALLOW_INBOUND_ICMPX && !g_deleting_map_entries &&
                               !is_icmpx_error && is_icmpx(pkt.nexthdr);
 
     struct map_binding_value *b_value_rev;
@@ -1786,7 +1786,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 
     if (!b_value_rev->is_static) {
         bool do_inbound_ct =
-            !g_deleting_map_entires && !is_icmpx_error &&
+            !g_deleting_map_entries && !is_icmpx_error &&
             ((b_value_rev->use != 0 && pkt_allow_initiating_ct(pkt.pkt_type)) ||
              (do_inbound_binding &&
               inet_addr_equal(&b_value_rev->to_addr, &pkt.tuple.daddr)));
@@ -1892,7 +1892,7 @@ int egress_snat(struct __sk_buff *skb) {
     }
 
     bool is_icmpx_error = is_icmpx_error_pkt(&pkt);
-    bool do_new = !g_deleting_map_entires && !is_icmpx_error &&
+    bool do_new = !g_deleting_map_entries && !is_icmpx_error &&
                   pkt_allow_initiating_ct(pkt.pkt_type);
 
     struct map_binding_value *b_value_orig, *b_value_rev;

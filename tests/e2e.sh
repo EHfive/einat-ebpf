@@ -83,7 +83,7 @@ ip netns exec device2 ping -c1 10.0.2.1
 
 
 # Create unreplied conntracks in router.
-# If we add one of these beforehands, the created conntrack would block connection from server's 3479 to device's 29999
+# If we add one of these beforehand, the created conntrack would block connection from server's 3479 to device's 29999
 ip netns exec server1 nc -uq0 -s 10.0.1.1 -p 3479 10.0.1.100 29999 <<<"test"
 ip netns exec server1 nc -uq0 -s 10.0.1.2 -p 3479 10.0.1.100 29999 <<<"test"
 ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.1 3479 <<<"test"

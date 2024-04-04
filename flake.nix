@@ -53,7 +53,7 @@
             crossCC = "${crossPkgs.stdenv.cc}/bin/${crossPkgs.stdenv.cc.targetPrefix}cc";
 
             buildInputs = with crossPkgs; [
-              ## runtime depedencies of libbpf-sys on target platform
+              ## runtime dependencies of libbpf-sys on target platform
               stdenv.cc.libc
               # elfutils already has static library built
               elfutils
@@ -77,19 +77,19 @@
             src = ./.;
             gitSubmodules = true;
             depsBuildBuild = with pkgs; [
-              # build depedencies of cargo build depenceies libbpf-cargo -> libbpf-sys
+              # build dependencies of cargo build depenceies libbpf-cargo -> libbpf-sys
               stdenv.cc
             ];
             nativeBuildInputs = with pkgs;[
               pkg-config
               # required by `libbpf_cargo::SkeletonBuilder`
               rustfmt
-              ## build depedencies of cargo build depenceies libbpf-cargo -> libbpf-sys
+              ## build dependencies of cargo build depenceies libbpf-cargo -> libbpf-sys
               stdenv.cc.libc
               zlib
               elfutils
 
-              ## build depedencies of libbpf-sys on target platform
+              ## build dependencies of libbpf-sys on target platform
               # for cross linking libelf and zlib, and make libbpf
               crossPkgs.stdenv.cc
               # compile BPF C code
@@ -137,7 +137,7 @@
       in
       {
         packages = {
-          # TODO: specifiy all possible combinations with matrix
+          # TODO: specify all possible combinations with matrix
           default = crossPackage { };
           ipv6 = crossPackage {
             features = [ "ipv6" ];

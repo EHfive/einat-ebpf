@@ -875,16 +875,16 @@ impl Instance {
 }
 
 fn with_skel_deleting<T, F: FnOnce(&mut EinatSkel) -> T>(skel: &mut EinatSkel, f: F) -> T {
-    skel.data_mut().g_deleting_map_entires = 1;
+    skel.data_mut().g_deleting_map_entries = 1;
 
     // Wait for 1ms and expecting all previous BPF program calls
-    // that had not seen g_deleting_map_entires=1 have finished,
+    // that had not seen g_deleting_map_entries=1 have finished,
     // so binding map and CT map become stable.
     std::thread::sleep(std::time::Duration::from_millis(1));
 
     let res = f(skel);
 
-    skel.data_mut().g_deleting_map_entires = 0;
+    skel.data_mut().g_deleting_map_entries = 0;
 
     res
 }
