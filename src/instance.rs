@@ -919,12 +919,14 @@ fn remove_binding_and_ct_entires(skel: &EinatSkel, external_addr: IpAddr) -> Res
         }
     }
 
-    map_binding.delete_batch(
-        &to_delete_binding_keys,
-        (to_delete_binding_keys.len() / core::mem::size_of::<MapBindingKey>()) as _,
-        MapFlags::ANY,
-        MapFlags::ANY,
-    )?;
+    if !to_delete_binding_keys.is_empty() {
+        map_binding.delete_batch(
+            &to_delete_binding_keys,
+            (to_delete_binding_keys.len() / core::mem::size_of::<MapBindingKey>()) as _,
+            MapFlags::ANY,
+            MapFlags::ANY,
+        )?;
+    }
 
     let mut to_delete_ct_keys = Vec::new();
     for ct_key_raw in map_ct.keys() {
@@ -934,12 +936,14 @@ fn remove_binding_and_ct_entires(skel: &EinatSkel, external_addr: IpAddr) -> Res
         }
     }
 
-    map_ct.delete_batch(
-        &to_delete_ct_keys,
-        (to_delete_ct_keys.len() / core::mem::size_of::<MapCtKey>()) as _,
-        MapFlags::ANY,
-        MapFlags::ANY,
-    )?;
+    if !to_delete_ct_keys.is_empty() {
+        map_ct.delete_batch(
+            &to_delete_ct_keys,
+            (to_delete_ct_keys.len() / core::mem::size_of::<MapCtKey>()) as _,
+            MapFlags::ANY,
+            MapFlags::ANY,
+        )?;
+    }
 
     Ok(())
 }
