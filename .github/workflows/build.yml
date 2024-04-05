@@ -48,6 +48,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: builds
+          merge-multiple: true
 
       - name: Add execution permission
         run: chmod +x builds/*
@@ -55,6 +56,7 @@ jobs:
       - name: Release with builds
         uses: softprops/action-gh-release@v2
         with:
-          files: builds/**/*
+          files: builds/*
+          fail_on_unmatched_files: true
           draft: true
           # TODO: fill release body with changelog
