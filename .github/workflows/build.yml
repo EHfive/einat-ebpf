@@ -46,6 +46,9 @@ jobs:
         with:
           path: builds
 
+      - name: Add execution permission
+        run: chmod +x builds/*
+
       - name: Release with builds
         uses: softprops/action-gh-release@v2
         with:
