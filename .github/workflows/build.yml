@@ -55,6 +55,6 @@ jobs:
       - name: Release with builds
         uses: softprops/action-gh-release@v2
         with:
-          files: builds/*
+          files: builds/**/*
           draft: true
           # TODO: fill release body with changelog
