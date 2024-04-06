@@ -18,7 +18,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, span, warn};
 
-use config::{Config, ConfigNetIf, NetIfId};
+use config::{Config, ConfigNetIf, IpProtocol, NetIfId, ProtoRange};
 use instance::Instance;
 use route::{HairpinRouting, IfAddresses, MonitorEvent, RouteHelper};
 
@@ -29,12 +29,15 @@ USAGE:
   einat [OPTIONS]
 
 OPTIONS:
-  -h, --help               Print this message
-  -c, --config <file>      Path to configuration file
-  -i, --ifname             Network interface name, e.g. eth0
-      --ifindex            Network interface index number, e.g. 2
-      --nat44              Enable NAT44/NAPT44 for specified network interface
-      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 0, disabled
+  -h, --help                  Print this message
+  -c, --config <file>         Path to configuration file
+  -i, --ifname                External network interface name, e.g. eth0
+      --ifindex               External network interface index number, e.g. 2
+      --nat44                 Enable NAT44/NAPT44 for specified network interface
+      --nat66                 Enable NAT66/NAPT66 for specified network interface
+      --ports <range> ...     External TCP/UDP port ranges, defaults to 20000-29999
+      --hairpin-if <name>...  Hairpin internal network interface names, e.g. lo, lan0
+      --bpf-log <level>       BPF tracing log level, 0 to 5, defaults to 0, disabled
 ";
 
 #[derive(Default)]
@@ -44,6 +47,8 @@ struct Args {
     if_name: Option<String>,
     nat44: bool,
     nat66: bool,
+    ports: Vec<ProtoRange>,
+    hairpin_if_names: Vec<String>,
     log_level: Option<u8>,
 }
 
@@ -71,6 +76,14 @@ fn parse_env_args() -> Result<Args> {
             }
             Long("nat66") => {
                 args.nat66 = true;
+            }
+            Long("ports") => {
+                let ports: Result<Vec<_>, _> = parser.values()?.map(|s| s.parse()).collect();
+                args.ports = ports?;
+            }
+            Long("hairpin-if") => {
+                let names: Result<Vec<_>, _> = parser.values()?.map(|s| s.parse()).collect();
+                args.hairpin_if_names = names?;
             }
             Long("bpf-log") => {
                 args.log_level = Some(parser.value()?.parse()?);
@@ -361,7 +374,7 @@ fn main() -> Result<()> {
 
     let args = parse_env_args()?;
 
-    let mut config: Config = if let Some(config_path) = args.config_file {
+    let mut config: Config = if let Some(config_path) = &args.config_file {
         let text = std::fs::read_to_string(config_path)?;
         toml::from_str(&text)?
     } else {
@@ -369,6 +382,12 @@ fn main() -> Result<()> {
     };
 
     if args.if_index.is_some() || args.if_name.is_some() {
+        if args.config_file.is_some() {
+            return Err(anyhow::anyhow!(
+                "Combining interface configuration from CLI options with configuration file is not allowed"
+            ));
+        }
+
         let interface = if let Some(if_index) = args.if_index {
             NetIfId::Index { if_index }
         } else if let Some(if_name) = args.if_name {
@@ -380,16 +399,36 @@ fn main() -> Result<()> {
         let nat44 = args.nat44 || !args.nat66;
         let nat66 = args.nat66;
 
+        #[cfg(not(feature = "ipv6"))]
+        if nat66 {
+            warn!("NAT66 feature not enabled for this build, ignoring");
+        }
+
+        if !args.ports.is_empty() {
+            config.defaults.tcp_ranges = args.ports.clone();
+            config.defaults.udp_ranges = args.ports;
+        }
+
+        let hairpin_route = config::ConfigHairpinRoute {
+            enable: None,
+            internal_if_names: args.hairpin_if_names,
+            ip_rule_pref: None,
+            table_id: None,
+            ip_protocols: vec![IpProtocol::Tcp, IpProtocol::Udp],
+        };
+
         let if_config = ConfigNetIf {
             interface,
             bpf_log_level: args.log_level,
             nat44,
             nat66,
             default_externals: true,
+            ipv4_hairpin_route: hairpin_route.clone(),
+            ipv6_hairpin_route: hairpin_route,
             ..Default::default()
         };
 
-        config.interfaces.push(if_config);
+        config.interfaces = vec![if_config];
     }
 
     if config.interfaces.is_empty() {

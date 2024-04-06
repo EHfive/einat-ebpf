@@ -40,20 +40,28 @@ USAGE:
   einat [OPTIONS]
 
 OPTIONS:
-  -h, --help               Print this message
-  -c, --config <file>      Path to configuration file
-  -i, --ifname             Network interface name, e.g. eth0
-      --ifindex            Network interface index number, e.g. 2
-      --nat44              Enable NAT44/NAPT44 for specified network interface
-      --bpf-log <level>    BPF tracing log level, 0 to 5, defaults to 0, disabled
+  -h, --help                  Print this message
+  -c, --config <file>         Path to configuration file
+  -i, --ifname                External network interface name, e.g. eth0
+      --ifindex               External network interface index number, e.g. 2
+      --nat44                 Enable NAT44/NAPT44 for specified network interface
+      --nat66                 Enable NAT66/NAPT66 for specified network interface
+      --ports <range> ...     External TCP/UDP port ranges, defaults to 20000-29999
+      --hairpin-if <name>...  Hairpin internal network interface names, e.g. lo, lan0
+      --bpf-log <level>       BPF tracing log level, 0 to 5, defaults to 0, disabled
 ```
 
 See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface. Also make sure nftables/iptables masquerading rule is not set.
 
 ```shell
+# Enable IP forwarding if not already
+sudo net.ipv4.ip_forward = 1
+# With simplified CLI options,
+# this setup NAT for traffic forwarding to and from wan0 and setup hairpin
+# routing for traffic forwarding from lo and lan0 to wan0
+sudo einat --ifname wan0 --hairpin-if lo lan0
+# With config file
 sudo einat --config /path/to/config.toml
-# or with simplified CLI options
-sudo einat --ifname eth0
 ```
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.

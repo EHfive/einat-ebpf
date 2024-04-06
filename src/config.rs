@@ -6,6 +6,7 @@ use std::fmt::Display;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
+use std::str::FromStr;
 
 use anyhow::Result;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -275,6 +276,27 @@ impl Display for ProtoRange {
     }
 }
 
+impl FromStr for ProtoRange {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        let Some((start, end)) = s.split_once('-') else {
+            return Err(anyhow::anyhow!("missing '-' in port range"));
+        };
+        let start: u16 = start.parse()?;
+        let end: u16 = end.parse()?;
+
+        if start > end {
+            // empty port range is valid for our bpf program but we explicitly disallow
+            // it on parsing stage to notify user about potential misconfiguration
+            return Err(anyhow::anyhow!("empty port range"));
+        }
+
+        Ok(ProtoRange {
+            inner: RangeInclusive::new(start, end),
+        })
+    }
+}
+
 impl<'de> Deserialize<'de> for ProtoRange {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -292,21 +314,7 @@ impl<'de> Deserialize<'de> for ProtoRange {
             where
                 E: serde::de::Error,
             {
-                let Some((start, end)) = v.split_once('-') else {
-                    return Err(DeError::custom("missing '-' in port range"));
-                };
-                let start: u16 = start.parse().map_err(DeError::custom)?;
-                let end: u16 = end.parse().map_err(DeError::custom)?;
-
-                if start > end {
-                    // empty port range is valid for our bpf program but we explicitly disallow
-                    // it on parsing stage to notify user about potential misconfiguration
-                    return Err(DeError::custom("empty port range"));
-                }
-
-                Ok(ProtoRange {
-                    inner: RangeInclusive::new(start, end),
-                })
+                v.parse().map_err(DeError::custom)
             }
         }
 
