@@ -6,6 +6,9 @@ ipv6_hairpin_rule_pref = 100
 ipv4_hairpin_table_id = 4787
 ipv6_hairpin_table_id = 4787
 
+# For ports not in specified ranges, einat would passthourgh NAT if the traffic
+# is on interface's external address. You should exclude ports of services (
+# e.g. SSH, HTTP server) expecting inbound traffic from these NAT port ranges.
 tcp_ranges = ["20000-29999"]
 udp_ranges = ["20000-29999"]
 icmp_ranges = ["0-65535"]
@@ -20,7 +23,7 @@ ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
 # External or outbound interface on which NAT would be performed.
-# Interface name would be resolved to iterface index
+# Interface name would be resolved to interface index
 if_name = "eth0"
 # `if_index` would be preferred if both `if_name` and `if_index` are specified
 if_index = 2
@@ -58,7 +61,7 @@ default_externals = true
 # Automatically configure hairpin routes
 [interfaces.ipv4_hairpin_route]
 # Enable the hairpin routing configuration, defaults to true if
-# `internal_if_names` is not empty, otherwise defualts to false.
+# `internal_if_names` is not empty, otherwise defaults to false.
 enable = false
 internal_if_names = [
     # "lo",
@@ -92,7 +95,7 @@ address = "192.168.4.2"
 no_snat = false
 # Disable hairpin the address.
 no_hairpin = false
-# Defaults to ranges in [defaults] if not secified.
+# Defaults to ranges in [defaults] if not specified.
 #tcp_ranges = ["10000-65535"]
 #udp_ranges = ["10000-65535"]
 #icmp_ranges = ["0-65535"]
