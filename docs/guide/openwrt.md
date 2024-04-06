@@ -55,4 +55,4 @@ einat -i pppoe-wan --hairpin-if lo br-lan
 
 You would also need to disable IP masquerading for WAN firewall zone, it can be done in Luci - Firewall page.
 
-If this works, you can add a init script to run `einat` as a service, see https://openwrt.org/docs/techref/initscripts.
+If this works, you can add an init script to run `einat` as a service, see https://openwrt.org/docs/techref/initscripts.

@@ -4,8 +4,8 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 
 ### Features
 
--   **eBPF**: IPv4 to Ipv4 NAPT(Network Address Port Translation)
--   **eBPF**: IPv6 to Ipv6 NAPT
+-   **eBPF**: IPv4 to IPv4 NAPT(Network Address Port Translation)
+-   **eBPF**: IPv6 to IPv6 NAPT
 -   **eBPF**: Endpoint-Independent(Full Cone) NAT for TCP, UDP and ICMP
 -   **eBPF**: Partial port-range usage, allows reserving external ports for other usage
 -   **Frontend**: Automatic reconfiguration on interface address changes
@@ -21,7 +21,7 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 
 It's also required the eBPF JIT implementation for target architecture in kernel has implemented support for BPF-to-BPF calls, which is not the case for MIPS and other architectures have less interests. This application is only tested to work on x86-64 or aarch64.
 
-See also [OpenWrt](./docs/guide/openwrt.md) for pitfalls running this on OpenWrt.
+See also [OpenWrt guide](./docs/guide/openwrt.md) for pitfalls running this on OpenWrt.
 
 ## Installation
 
@@ -51,24 +51,24 @@ USAGE:
   einat [OPTIONS]
 
 OPTIONS:
-  -h, --help                  Print this message
-  -c, --config <file>         Path to configuration file
-  -i, --ifname                External network interface name, e.g. eth0
-      --ifindex               External network interface index number, e.g. 2
-      --nat44                 Enable NAT44/NAPT44 for specified network interface
-      --nat66                 Enable NAT66/NAPT66 for specified network interface
-      --ports <range> ...     External TCP/UDP port ranges, defaults to 20000-29999
-      --hairpin-if <name>...  Hairpin internal network interface names, e.g. lo, lan0
-      --bpf-log <level>       BPF tracing log level, 0 to 5, defaults to 0, disabled
+  -h, --help                   Print this message
+  -c, --config <file>          Path to configuration file
+  -i, --ifname                 External network interface name, e.g. eth0
+      --ifindex                External network interface index number, e.g. 2
+      --nat44                  Enable NAT44/NAPT44 for specified network interface
+      --nat66                  Enable NAT66/NAPT66 for specified network interface
+      --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
+      --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
+      --bpf-log <level>        BPF tracing log level, 0 to 5, defaults to 0, disabled
 ```
 
-Basic usage with command-line interface, you would only need to specify external interface name in a minimal setup, and `einat` would select an external IP address on specified interface and reconfigures automatically.
+You would only need to specify external interface name in a minimal setup, and `einat` would select an external IP address on specified interface and reconfigures automatically.
 
 ```shell
 # Enable IP forwarding if not already
 sudo sysctl net.ipv4.ip_forward=1
 # With simplified CLI options,
-# this setups NAT for traffic forwarding to and from wan0 and setup hairpin
+# this setup NAT for traffic forwarding to and from wan0 and setup hairpin
 # routing for traffic forwarding from lo and lan0 to wan0
 sudo einat --ifname wan0 --hairpin-if lo lan0
 # With config file

@@ -463,7 +463,7 @@ trait RuntimeConfig {
                     debug!("update external config of {:?}", k);
 
                     with_skel_deleting(skel, |skel| -> Result<()> {
-                        remove_binding_and_ct_entires(skel, k.ip_addr())?;
+                        remove_binding_and_ct_entries(skel, k.ip_addr())?;
 
                         let maps = skel.maps();
                         let map_ext_config = Self::skel_map_external_config(&maps);
@@ -482,7 +482,7 @@ trait RuntimeConfig {
                         let map_ext_config = Self::skel_map_external_config(&maps);
                         Self::with_lpm_key_bytes(*k, |k| map_ext_config.delete(k))?;
 
-                        remove_binding_and_ct_entires(skel, k.ip_addr())
+                        remove_binding_and_ct_entries(skel, k.ip_addr())
                     })?;
                 }
             }
@@ -889,7 +889,7 @@ fn with_skel_deleting<T, F: FnOnce(&mut EinatSkel) -> T>(skel: &mut EinatSkel, f
     res
 }
 
-fn remove_binding_and_ct_entires(skel: &EinatSkel, external_addr: IpAddr) -> Result<()> {
+fn remove_binding_and_ct_entries(skel: &EinatSkel, external_addr: IpAddr) -> Result<()> {
     use skel::{BindingFlags, InetAddr, MapBindingKey, MapBindingValue, MapCtKey};
 
     let maps = skel.maps();

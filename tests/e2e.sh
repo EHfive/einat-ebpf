@@ -3,7 +3,7 @@ set -eux
 
 ip -all netns delete
 
-# enable forwaring
+# enable forwarding
 
 ip netns add server1
 ip netns add server2
