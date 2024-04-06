@@ -66,9 +66,9 @@ Basic usage with command-line interface, you would only need to specify external
 
 ```shell
 # Enable IP forwarding if not already
-sudo net.ipv4.ip_forward = 1
+sudo sysctl net.ipv4.ip_forward=1
 # With simplified CLI options,
-# this setup NAT for traffic forwarding to and from wan0 and setup hairpin
+# this setups NAT for traffic forwarding to and from wan0 and setup hairpin
 # routing for traffic forwarding from lo and lan0 to wan0
 sudo einat --ifname wan0 --hairpin-if lo lan0
 # With config file
