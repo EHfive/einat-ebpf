@@ -209,16 +209,33 @@ impl RouteHelper {
             #[cfg(not(feature = "ipv6"))]
             let matches = matches!(msg.header.family, AddressFamily::Inet);
             if matches {
+                // Cited from <if_addr.h>
+                // Important comment:
+                // IFA_ADDRESS is prefix address, rather than local interface address.
+                // It makes no difference for normally configured broadcast interfaces,
+                // but for point-to-point IFA_ADDRESS is DESTINATION address,
+                // local address is supplied in IFA_LOCAL attribute.
+                //
+                // Thus we prefer local address if it's found in returned attributes.
+                let mut local_address = None;
+                let mut address = None;
                 for attr in msg.attributes {
-                    #[allow(clippy::collapsible_match)]
+                    if let AddressAttribute::Local(addr) = attr {
+                        local_address = Some(addr);
+                    }
                     if let AddressAttribute::Address(addr) = attr {
-                        match addr {
-                            IpAddr::V4(addr) => res.ipv4.push(addr),
-                            #[cfg(feature = "ipv6")]
-                            IpAddr::V6(addr) => res.ipv6.push(addr),
-                            #[allow(unreachable_patterns)]
-                            _ => (),
-                        }
+                        address = Some(addr);
+                    }
+                }
+
+                #[allow(clippy::collapsible_match)]
+                if let Some(addr) = local_address.or(address) {
+                    match addr {
+                        IpAddr::V4(addr) => res.ipv4.push(addr),
+                        #[cfg(feature = "ipv6")]
+                        IpAddr::V6(addr) => res.ipv6.push(addr),
+                        #[allow(unreachable_patterns)]
+                        _ => (),
                     }
                 }
             }
