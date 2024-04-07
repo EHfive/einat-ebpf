@@ -130,6 +130,8 @@ impl IfContext {
 async fn daemon(config: &Config, contexts: &mut HashMap<u32, IfContext>) -> Result<JoinHandle<()>> {
     let (monitor_task, rt_helper, events) = route::spawn_monitor()?;
 
+    // TODO: implement network interface(link) monitoring to attach/detach interface automatically
+
     let mut inst_configs = HashMap::with_capacity(config.interfaces.len());
 
     for (config_idx, if_config) in config.interfaces.iter().enumerate() {
