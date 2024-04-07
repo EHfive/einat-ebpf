@@ -220,11 +220,10 @@ impl RouteHelper {
                 let mut local_address = None;
                 let mut address = None;
                 for attr in msg.attributes {
-                    if let AddressAttribute::Local(addr) = attr {
-                        local_address = Some(addr);
-                    }
-                    if let AddressAttribute::Address(addr) = attr {
-                        address = Some(addr);
+                    match attr {
+                        AddressAttribute::Local(addr) => local_address = Some(addr),
+                        AddressAttribute::Address(addr) => address = Some(addr),
+                        _ => (),
                     }
                 }
 
