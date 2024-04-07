@@ -11,9 +11,8 @@ ipv6_hairpin_table_id = 4787
 # e.g. SSH, HTTP server) expecting inbound traffic from these NAT port ranges.
 tcp_ranges = ["20000-29999"]
 udp_ranges = ["20000-29999"]
-# Inbound ICMP qurey ID ranges
+icmp_ranges = ["0-65535"]
 icmp_in_ranges = ["0-9999"]
-# Outbound ICMP qurey ID ranges
 icmp_out_ranges = ["1000-65535"]
 
 # Minimal NAT44 configuration with hairpin routing
@@ -99,6 +98,7 @@ no_hairpin = false
 # Defaults to ranges in [defaults] if not specified.
 #tcp_ranges = ["10000-65535"]
 #udp_ranges = ["10000-65535"]
+#icmp_ranges = ["0-65535"]
 #icmp_in_ranges = ["0-9999"]
 #icmp_out_ranges = ["1000-65535"]
 
