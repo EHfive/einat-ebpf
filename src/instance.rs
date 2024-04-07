@@ -157,7 +157,7 @@ fn sort_and_merge_ranges(ranges: &[RangeInclusive<u16>]) -> Vec<RangeInclusive<u
     let mut curr = ranges[0].clone();
 
     for next in ranges.iter().skip(1) {
-        if next.start() > curr.end() {
+        if *next.start() > *curr.end() + 1 {
             res.push(core::mem::replace(&mut curr, next.clone()));
         } else if next.end() > curr.end() {
             curr = *curr.start()..=*next.end();
@@ -170,13 +170,7 @@ fn sort_and_merge_ranges(ranges: &[RangeInclusive<u16>]) -> Vec<RangeInclusive<u
 
 impl ExternalRanges {
     fn try_from(ranges: &[ProtoRange], allow_zero: bool) -> Result<Self> {
-        if ranges.len() > skel::MAX_PORT_RANGES {
-            return Err(anyhow!(
-                "exceed limit of max {} ranges in port ranges list",
-                skel::MAX_PORT_RANGES
-            ));
-        }
-        let ranges = ranges
+        let ranges: Vec<_> = ranges
             .iter()
             .map(|range| {
                 if !allow_zero && *range.inner.start() == 0 {
@@ -186,29 +180,16 @@ impl ExternalRanges {
                 }
             })
             .collect::<Result<_>>()?;
-        Ok(Self(ranges))
-    }
 
-    fn contains(&self, other: &ExternalRanges) -> bool {
-        let this = sort_and_merge_ranges(&self.0);
-        let other = sort_and_merge_ranges(&other.0);
-        let mut other_it = other.iter().peekable();
-        for range in this {
-            while let Some(other) = other_it.peek() {
-                if other.start() < range.start() {
-                    return false;
-                }
-                if other.start() > range.end() {
-                    // continue outer loop
-                    break;
-                }
-                if other.end() > range.end() {
-                    return false;
-                }
-                let _ = other_it.next();
-            }
+        let ranges = sort_and_merge_ranges(&ranges);
+
+        if ranges.len() > skel::MAX_PORT_RANGES {
+            return Err(anyhow!(
+                "exceed limit of max {} ranges in port ranges list",
+                skel::MAX_PORT_RANGES
+            ));
         }
-        other_it.peek().is_none()
+        Ok(Self(ranges))
     }
 
     fn apply_raw(&self, raw_ranges: &mut skel::PortRanges, raw_len: &mut u8) {
@@ -240,52 +221,25 @@ impl External {
             false,
         )?;
 
-        let icmp_ranges = ExternalRanges::try_from(
-            external
-                .icmp_ranges
-                .as_ref()
-                .unwrap_or(&defaults.icmp_ranges),
-            true,
-        )?;
+        let icmp_in_ranges = external
+            .icmp_in_ranges
+            .as_ref()
+            .unwrap_or(&defaults.icmp_in_ranges);
 
-        let icmp_in_ranges = if icmp_ranges.0.is_empty() {
-            ExternalRanges(Vec::new())
-        } else {
-            ExternalRanges::try_from(
-                external
-                    .icmp_in_ranges
-                    .as_ref()
-                    .unwrap_or(&defaults.icmp_in_ranges),
-                true,
-            )?
-        };
+        let icmp_out_ranges = external
+            .icmp_out_ranges
+            .as_ref()
+            .unwrap_or(&defaults.icmp_out_ranges);
 
-        let icmp_out_ranges = if icmp_ranges.0.is_empty() {
-            ExternalRanges(Vec::new())
-        } else {
-            ExternalRanges::try_from(
-                external
-                    .icmp_out_ranges
-                    .as_ref()
-                    .unwrap_or(&defaults.icmp_out_ranges),
-                true,
-            )?
-        };
+        let icmp_ranges: Vec<_> = icmp_in_ranges
+            .iter()
+            .chain(icmp_out_ranges)
+            .cloned()
+            .collect();
 
-        if !icmp_ranges.contains(&icmp_in_ranges) {
-            return Err(anyhow!(
-                "ICMP ranges {:?} not fully include ICMP inbound ranges {:?}",
-                icmp_ranges,
-                icmp_in_ranges
-            ));
-        }
-        if !icmp_ranges.contains(&icmp_out_ranges) {
-            return Err(anyhow!(
-                "ICMP ranges {:?} not fully include ICMP outbound ranges {:?}",
-                icmp_ranges,
-                icmp_in_ranges
-            ));
-        }
+        let icmp_ranges = ExternalRanges::try_from(&icmp_ranges, true)?;
+        let icmp_in_ranges = ExternalRanges::try_from(icmp_in_ranges, true)?;
+        let icmp_out_ranges = ExternalRanges::try_from(icmp_out_ranges, true)?;
 
         Ok(Self {
             address: external.address,
@@ -958,21 +912,33 @@ mod tests {
             ProtoRange { inner: 0..=100 },
             ProtoRange { inner: 50..=150 },
             ProtoRange { inner: 250..=290 },
+            ProtoRange { inner: 250..=290 },
         ];
         let ranges_a = ExternalRanges::try_from(&ranges_a, true).unwrap();
-        assert_eq!(vec![0..=150, 200..=300], sort_and_merge_ranges(&ranges_a.0));
-        assert!(ranges_a.contains(&ranges_a));
+        assert_eq!(vec![0..=150, 200..=300], ranges_a.0);
 
-        let ranges_b = vec![ProtoRange { inner: 0..=100 }];
+        let ranges_b = vec![
+            ProtoRange { inner: 0..=1 },
+            ProtoRange { inner: 2..=3 },
+            ProtoRange { inner: 4..=5 },
+            ProtoRange { inner: 6..=7 },
+            ProtoRange { inner: 8..=9 },
+        ];
         let ranges_b = ExternalRanges::try_from(&ranges_b, true).unwrap();
-        assert!(ranges_a.contains(&ranges_b));
+        assert_eq!(vec![0..=9], ranges_b.0);
 
-        let ranges_c = vec![ProtoRange { inner: 120..=220 }];
-        let ranges_c = ExternalRanges::try_from(&ranges_c, true).unwrap();
-        assert!(!ranges_a.contains(&ranges_c));
+        let ranges_c = vec![
+            ProtoRange { inner: 0..=1 },
+            ProtoRange { inner: 3..=4 },
+            ProtoRange { inner: 6..=7 },
+            ProtoRange { inner: 9..=10 },
+            ProtoRange { inner: 12..=13 },
+        ];
+        let ranges_c = ExternalRanges::try_from(&ranges_c, true);
+        assert!(ranges_c.is_err());
 
-        let ranges_d = vec![ProtoRange { inner: 0..=1 }];
-        let ranges_d = ExternalRanges::try_from(&ranges_d, false);
-        assert!(ranges_d.is_err())
+        let ranges_b = vec![ProtoRange { inner: 0..=1 }];
+        let ranges_b = ExternalRanges::try_from(&ranges_b, false);
+        assert!(ranges_b.is_err());
     }
 }

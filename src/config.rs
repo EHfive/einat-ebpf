@@ -31,7 +31,6 @@ pub struct ConfigDefaults {
     pub ipv6_hairpin_table_id: NonZeroU32,
     pub tcp_ranges: ProtoRanges,
     pub udp_ranges: ProtoRanges,
-    pub icmp_ranges: ProtoRanges,
     pub icmp_in_ranges: ProtoRanges,
     pub icmp_out_ranges: ProtoRanges,
 }
@@ -337,7 +336,6 @@ impl Default for ConfigDefaults {
             ipv6_hairpin_table_id: NonZeroU32::new(4787).unwrap(),
             tcp_ranges: range(20000..=29999),
             udp_ranges: range(20000..=29999),
-            icmp_ranges: range(0..=u16::MAX),
             icmp_in_ranges: range(0..=9999),
             icmp_out_ranges: range(1000..=u16::MAX),
         }
