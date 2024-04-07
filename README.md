@@ -7,16 +7,16 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 -   **eBPF**: IPv4 to IPv4 NAPT(Network Address Port Translation)
 -   **eBPF**: IPv6 to IPv6 NAPT
 -   **eBPF**: Endpoint-Independent(Full Cone) NAT for TCP, UDP and ICMP
--   **eBPF**: Partial port-range usage, allows reserving external ports for other usage
+-   **eBPF**: Partial external port range usage, allows reserving external ports for other usage
 -   **Frontend**: Automatic reconfiguration on interface address changes
--   **Frontend**: Automatic hairpin IP rule and route setup, see https://github.com/EHfive/einat-ebpf/issues/4
+-   **Frontend**: Automatic IP rule and route setup for hairpinning, see https://github.com/EHfive/einat-ebpf/issues/4
 
 ## Requirement
 
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
 -   `libelf` from elfutils
 -   `zlib`
--   `clang` to compile BPF C code
+-   `clang` for bindgen and compiling BPF C code
 -   `cargo` and `rustfmt` for building
 
 It's also required the eBPF JIT implementation for target architecture in kernel has implemented support for BPF-to-BPF calls, which is not the case for MIPS and other architectures have less interests. This application is only tested to work on x86-64 or aarch64.
@@ -69,7 +69,7 @@ You would only need to specify external interface name in a minimal setup, and `
 sudo sysctl net.ipv4.ip_forward=1
 # With simplified CLI options,
 # this setup NAT for traffic forwarding to and from wan0 and setup hairpin
-# routing for traffic forwarding from lo and lan0 to wan0
+# routing for traffic forwarding from lo or lan0 to wan0
 sudo einat --ifname wan0 --hairpin-if lo lan0
 # With config file
 sudo einat --config /path/to/config.toml

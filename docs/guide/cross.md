@@ -12,6 +12,12 @@ apt install libelf-dev zlib1g-dev gcc-aarch64-linux-gnu clang
 
 Install `rustup` to get Rust>=1.74, see https://www.rust-lang.org/tools/install. Also make sure `rustfmt` is installed as it's used by `libbpf-cargo`.
 
+Add required target to Rust toolchain:
+
+```
+rustup target add aarch64-unknown-linux-gnu
+```
+
 ### Target Dependencies
 
 ```

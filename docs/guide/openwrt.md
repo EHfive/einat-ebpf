@@ -3,7 +3,9 @@
 As said in [README](../../README.md), `einat` requires a kernel with BPF and BTF support enabled which is not the default.
 And `einat` requires running kernel for target architecture has support for BPF-to-BPF calls, which is not the case for MIPS and other older architectures.
 
-So if the architecture of your router is not x86-64 or aarch64 or other actively maintained architecture in kernel, your router would mostly not be able to run `einat`.
+So if the architecture of your router is not x86-64 or aarch64 or other actively maintained architecture in kernel, your router would mostly not be able to have `einat` working.
+
+The following is OpenWrt build configs required for `einat` to work.
 
 ### Build Configs
 
