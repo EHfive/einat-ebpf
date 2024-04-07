@@ -15,11 +15,6 @@ All notable changes to this project will be documented in this file.
 - Fix port range merging algorithm
 - Prefer local address over prefix address
 
-### Improve
-
-- Calculate icmp_ranges from icmp_in_ranges and icmp_out_ranges
-
-
 ## [0.1.0] - 2024-04-05
 
 Initial release.
