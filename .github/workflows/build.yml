@@ -59,4 +59,3 @@ jobs:
           files: builds/*
           fail_on_unmatched_files: true
           draft: true
-          # TODO: fill release body with changelog
