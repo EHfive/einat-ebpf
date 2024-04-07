@@ -157,7 +157,7 @@ fn sort_and_merge_ranges(ranges: &[RangeInclusive<u16>]) -> Vec<RangeInclusive<u
     let mut curr = ranges[0].clone();
 
     for next in ranges.iter().skip(1) {
-        if next.start() > curr.end() {
+        if *next.start() > *curr.end() + 1 {
             res.push(core::mem::replace(&mut curr, next.clone()));
         } else if next.end() > curr.end() {
             curr = *curr.start()..=*next.end();
@@ -170,13 +170,7 @@ fn sort_and_merge_ranges(ranges: &[RangeInclusive<u16>]) -> Vec<RangeInclusive<u
 
 impl ExternalRanges {
     fn try_from(ranges: &[ProtoRange], allow_zero: bool) -> Result<Self> {
-        if ranges.len() > skel::MAX_PORT_RANGES {
-            return Err(anyhow!(
-                "exceed limit of max {} ranges in port ranges list",
-                skel::MAX_PORT_RANGES
-            ));
-        }
-        let ranges = ranges
+        let ranges: Vec<_> = ranges
             .iter()
             .map(|range| {
                 if !allow_zero && *range.inner.start() == 0 {
@@ -186,6 +180,14 @@ impl ExternalRanges {
                 }
             })
             .collect::<Result<_>>()?;
+        let ranges = sort_and_merge_ranges(&ranges);
+
+        if ranges.len() > skel::MAX_PORT_RANGES {
+            return Err(anyhow!(
+                "exceed limit of max {} ranges in port ranges list",
+                skel::MAX_PORT_RANGES
+            ));
+        }
         Ok(Self(ranges))
     }
 
@@ -960,7 +962,7 @@ mod tests {
             ProtoRange { inner: 250..=290 },
         ];
         let ranges_a = ExternalRanges::try_from(&ranges_a, true).unwrap();
-        assert_eq!(vec![0..=150, 200..=300], sort_and_merge_ranges(&ranges_a.0));
+        assert_eq!(vec![0..=150, 200..=300], ranges_a.0);
         assert!(ranges_a.contains(&ranges_a));
 
         let ranges_b = vec![ProtoRange { inner: 0..=100 }];
