@@ -338,12 +338,14 @@ trait RuntimeConfig {
             match external.address {
                 AddressOrMatcher::Static { address } => {
                     if let Some(address) = Self::Prefix::from_ip_addr(address) {
-                        matches.push(address);
+                        if !address.is_unspecified() {
+                            matches.push(address);
+                        }
                     }
                 }
                 AddressOrMatcher::Matcher { match_address } => {
                     for address in addresses_set.iter() {
-                        if match_address.contains(&address.ip_addr()) {
+                        if match_address.contains(&address.ip_addr()) && !address.is_unspecified() {
                             matches.push(*address);
                         }
                     }
@@ -395,9 +397,7 @@ trait RuntimeConfig {
             }
         }
 
-        if let Some(external_addr) = external_addr {
-            *self.external_addr_mut() = external_addr;
-        }
+        *self.external_addr_mut() = external_addr.unwrap_or(Self::Prefix::unspecified());
     }
 
     fn hairpin_dests(&self) -> Vec<Self::Prefix> {

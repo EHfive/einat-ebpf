@@ -75,11 +75,15 @@ pub trait IpNetwork: Sized {
 
     fn addr(&self) -> Self::Addr;
 
+    fn is_unspecified(&self) -> bool;
+
     fn ip_addr(&self) -> IpAddr;
 
     fn from_addr(addr: Self::Addr) -> Self;
 
     fn from_ip_addr(addr: IpAddr) -> Option<Self>;
+
+    fn unspecified() -> Self;
 }
 
 impl IpNetwork for Ipv4Net {
@@ -92,6 +96,10 @@ impl IpNetwork for Ipv4Net {
 
     fn addr(&self) -> Self::Addr {
         Ipv4Net::addr(self)
+    }
+
+    fn is_unspecified(&self) -> bool {
+        self.addr().is_unspecified()
     }
 
     fn ip_addr(&self) -> IpAddr {
@@ -109,6 +117,10 @@ impl IpNetwork for Ipv4Net {
             None
         }
     }
+
+    fn unspecified() -> Self {
+        Self::from_addr(Ipv4Addr::UNSPECIFIED)
+    }
 }
 
 #[cfg(feature = "ipv6")]
@@ -122,6 +134,10 @@ impl IpNetwork for Ipv6Net {
 
     fn addr(&self) -> Self::Addr {
         Ipv6Net::addr(self)
+    }
+
+    fn is_unspecified(&self) -> bool {
+        self.addr().is_unspecified()
     }
 
     fn ip_addr(&self) -> IpAddr {
@@ -138,6 +154,10 @@ impl IpNetwork for Ipv6Net {
         } else {
             None
         }
+    }
+
+    fn unspecified() -> Self {
+        Self::from_addr(Ipv6Addr::UNSPECIFIED)
     }
 }
 
