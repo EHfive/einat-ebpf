@@ -75,7 +75,9 @@ sudo einat --ifname wan0 --hairpin-if lo lan0
 sudo einat --config /path/to/config.toml
 ```
 
-See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface. Also make sure nftables/iptables masquerading rule is not set.
+See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface.
+
+Also make sure nftables/iptables masquerading rule is not set and allow forwarding of inbound traffic from external interface to internal interfaces for port ranges `einat` uses.
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
 
