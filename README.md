@@ -53,8 +53,8 @@ USAGE:
 OPTIONS:
   -h, --help                   Print this message
   -c, --config <file>          Path to configuration file
-  -i, --ifname                 External network interface name, e.g. eth0
-      --ifindex                External network interface index number, e.g. 2
+  -i, --ifname <name>          External network interface name, e.g. eth0
+      --ifindex <index>        External network interface index number, e.g. 2
       --nat44                  Enable NAT44/NAPT44 for specified network interface
       --nat66                  Enable NAT66/NAPT66 for specified network interface
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
