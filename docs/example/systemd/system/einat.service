@@ -1,0 +1,13 @@
+[Unit]
+Description=einat-ebpf service
+After=network.target
+
+[Service]
+User=einat
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN
+ExecStart=/usr/bin/einat -c /etc/einat/config.toml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+# See "config.sample.toml" for more options.
+
+[[interfaces]]
+if_name = "eth0"
+# NAT44 and NAT66 are disabled by default, set `nat44` and `nat66` to enable.
+#nat44 = true
+#nat66 = true
+ipv4_hairpin_route.internal_if_names = []
