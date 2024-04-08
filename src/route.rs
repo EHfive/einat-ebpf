@@ -611,10 +611,20 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
         let ll_addr = if matches!(link.encap(), PacketEncap::Ethernet) {
             let ll_addr = link.address().cloned();
-            if ll_addr.is_none() {
+            if let Some(ll_addr) = ll_addr {
+                if ll_addr.iter().all(|&i| i == 0) {
+                    warn!(
+                        "link address of if {} is unspecified",
+                        self.external_if_index
+                    );
+                    None
+                } else {
+                    Some(ll_addr)
+                }
+            } else {
                 warn!("no link address on if {}", self.external_if_index);
+                None
             }
-            ll_addr
         } else {
             None
         };
