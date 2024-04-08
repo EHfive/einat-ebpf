@@ -77,7 +77,7 @@ sudo einat --config /path/to/config.toml
 
 See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface.
 
-Also make sure nftables/iptables masquerading rule is not set and allow forwarding of inbound traffic from external interface to internal interfaces for port ranges `einat` uses.
+Also make sure nftables/iptables masquerading rule is not set and forwarding of inbound traffic from external interface to internal interfaces for port ranges `einat` uses is allowed.
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
 
@@ -93,7 +93,7 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 Instead of relying on existing Netfilter conntrack system like these out-of-tree kernel modules did, we implement a fully functional Endpoint Independent NAT engine on eBPF TC hook from scratch thus avoiding hassles dealing with "Address and Port-Dependent" Netfilter conntrack system and being slim and efficient.
 
-And our application enjoys libbpf's CO-RE(Compile Once – Run Everywhere) capabilities that hugely simplifies distribution and deployment.
+And `einat` utilizes libbpf's CO-RE(Compile Once – Run Everywhere) capabilities that hugely simplifies distribution and deployment.
 
 ## Recommended Reading
 

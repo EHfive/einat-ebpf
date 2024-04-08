@@ -29,7 +29,7 @@ CONFIG_DEBUG_INFO_BTF=y
 
 ### Kernel Configs
 
-Additionally kernel configs required, you might need to add these to kernel config file manually, see https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem#kernel_configuration_optional .
+Additional kernel configs required, you might need to add these to kernel config file manually, see https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem#kernel_configuration_optional .
 
 ```
 CONFIG_BPF_SYSCALL=y
@@ -55,6 +55,6 @@ chmod +x einat
 einat -i pppoe-wan --hairpin-if lo br-lan
 ```
 
-You would also need to disable IP masquerading for WAN firewall zone and allow inbound traffic forwarding from WAN to LAN, it can be done in Luci - Firewall page.
+You would also need to disable IP masquerading for WAN firewall zone and allow inbound traffic forwarding from WAN to LAN, that can be done in Luci - Firewall page.
 
 If this works, you can add an init script to run `einat` as a service, see https://openwrt.org/docs/techref/initscripts.
