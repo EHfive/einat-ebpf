@@ -20,7 +20,11 @@
     let
       crossPackage' = import ./nix/cross-package.nix { inherit fenix naersk; };
 
-      overlay = final: prev: { einat = prev.callPackage crossPackage' { }; };
+      overlay = final: prev: {
+        einat = crossPackage' {
+          pkgs = (import nixpkgs) { inherit (prev) system; };
+        };
+      };
 
       module = {
         imports = [
@@ -39,7 +43,7 @@
           };
           inherit (pkgs) lib;
 
-          crossPackage = { ... }@args: pkgs.callPackage crossPackage' args;
+          crossPackage = { ... }@args: crossPackage' { inherit pkgs; } // args;
         in
         {
           packages = {
