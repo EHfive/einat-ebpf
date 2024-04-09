@@ -4,7 +4,7 @@ The following use cases assume:
 
 -   A Linux network setup with loopback interface `lo`, an internal network interface `lan` and an external network interface `wan` on router.
 -   An EIM + EIF(Full Cone) external network (like an EIM + EIF CGNAT) or a external network with public IPv4 address on `wan`.
--   The firewall is not block traffic of interfaces or ports that `einat` interacts.
+-   The firewall is not blocking traffic of interfaces or ports that `einat` interacts.
 -   `einat` NAPT44 is setup on `wan` and have hairpin routing setup for traffic from `lo` and `lan`, i.e. `einat -i wan --hairpin-if lo lan`.
 
 And we give the following example network configuration:
@@ -41,7 +41,7 @@ Filtering test: success
 Nat filtering: Endpoint Independent Filtering
 ```
 
-Also if you perform NAT behavior test with the some local source port but from a different address in a short gap, the result should also be EIM + EIF and the resulting external port should not be the same with previous test. Otherwise for a network setup with `einat` behind an external NAT, the external NAT has a fake EIM behavior.
+Also if you perform NAT behavior test with the same local source port but from a different address in a short gap, the result should also be EIM + EIF and the resulting external port should not be the same with previous test. Otherwise, for a network setup with `einat` behind an external NAT, the external NAT has a fake EIM behavior.
 
 ```shell
 $ stunclient stunserver.stunprotocol.org --mode full --verbosity 1 --protocol udp --localaddr 192.168.1.200 --localport 20000
@@ -55,7 +55,7 @@ Nat filtering: Endpoint Independent Filtering
 
 ### STUN-based port mapping with Natter
 
-[Natter](https://github.com/MikeWang000000/Natter) is a STUN-based port mapping daemon, you can use this tool to hold a external TCP/UDP port and forwarding the traffic to a specified target(e.g. a local TCP listening service).
+[Natter](https://github.com/MikeWang000000/Natter) is a STUN-based port mapping daemon, you can use this tool to hold an external TCP/UDP port and forwarding the traffic to a specified target(e.g. a local TCP listening service).
 
 Run Natter on device 1 with test forwarder.
 

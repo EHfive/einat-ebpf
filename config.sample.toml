@@ -11,7 +11,7 @@ ipv6_hairpin_table_id = 4787
 # e.g. SSH, HTTP server) expecting inbound traffic from these NAT port ranges.
 tcp_ranges = ["20000-29999"]
 udp_ranges = ["20000-29999"]
-# Combinded ICMP query ID ranges, must include `icmp_in_ranges` and `icmp_out_ranges`.
+# Combined ICMP query ID ranges, must include `icmp_in_ranges` and `icmp_out_ranges`.
 icmp_ranges = ["0-65535"]
 # Inbound ICMP query ID ranges
 icmp_in_ranges = ["0-9999"]
