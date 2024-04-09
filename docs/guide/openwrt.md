@@ -1,9 +1,9 @@
 ## OpenWrt
 
-As said in [README](../../README.md), `einat` requires a kernel with BPF and BTF support enabled which is not the default.
-And `einat` requires running kernel for target architecture has support for BPF-to-BPF calls, which is not the case for MIPS and other older architectures.
+As said in [README](../../README.md), `einat` requires a kernel with BPF and BTF support enabled which is not the default in OpenWrt.
+And `einat` requires running kernel for target architecture has implemented support for BPF-to-BPF calls, which is not the case for MIPS and some other architectures with less maintenance in BPF codebase.
 
-So if the architecture of your router is not x86-64 or aarch64 or other actively maintained architecture in kernel, your router would mostly not be able to have `einat` working.
+So if the architecture of your router is not x86-64 or aarch64 or other actively maintained architecture in kernel, your router would mostly not be able to have `einat` working. Unless someone has implemented BPF features `einat` required for the architecture.
 
 The following is OpenWrt build configs required for `einat` to work.
 
@@ -40,7 +40,7 @@ CONFIG_NET_ACT_BPF=y
 
 See https://github.com/iovisor/bcc/blob/master/docs/kernel_config.md for explanation on these BPF options.
 
-### NAT setup
+### Setup einat
 
 Find out interface names for your router with `ip addr`, it would be `pppoe-wan` or `wan` for external interface and `br-lan` for internal interface in a common OpenWrt setup.
 
@@ -55,6 +55,6 @@ chmod +x einat
 einat -i pppoe-wan --hairpin-if lo br-lan
 ```
 
-You would also need to disable IP masquerading for WAN firewall zone and allow inbound traffic forwarding from WAN to LAN, that can be done in Luci - Firewall page.
+You would also need to **disable IP masquerading** for WAN firewall zone and **allow inbound traffic forwarding from WAN to LAN**, that can be done in Luci - Firewall page.
 
 If this works, you can add an init script to run `einat` as a service, see https://openwrt.org/docs/techref/initscripts.
