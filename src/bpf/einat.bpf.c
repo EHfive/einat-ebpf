@@ -37,7 +37,7 @@ const volatile u8 ALLOW_INBOUND_ICMPX = true;
 // https://datatracker.ietf.org/doc/html/rfc6146#section-4
 const volatile u64 TIMEOUT_FRAGMENT = 2E9;
 
-const volatile u64 TIMEOUT_PKT_MIN = 60E9;
+const volatile u64 TIMEOUT_PKT_MIN = 120E9;
 const volatile u64 TIMEOUT_PKT_DEFAULT = 300E9;
 
 // https://datatracker.ietf.org/doc/html/rfc6146#section-4
