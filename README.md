@@ -11,7 +11,9 @@ This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint
 -   **Frontend**: Automatic reconfiguration on interface address changes
 -   **Frontend**: Automatic IP rule and route setup for hairpinning, see https://github.com/EHfive/einat-ebpf/issues/4
 
-See also example [use cases](./docs/guide/use-case.md) for what can be achieved with EIM + EIF and other features `einat` provides.
+See example [use cases](./docs/guide/use-case.md) for what can be achieved with EIM + EIF and other features `einat` provides.
+
+For implementation details, see documentations under [reference](./docs/reference/).
 
 ## Requirement
 
