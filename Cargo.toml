@@ -29,7 +29,7 @@ static = ["libbpf-sys/static"]
 #
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.82"
 async-stream = "0.3.5"
 bitflags = { version = "2.5.0", features = ["bytemuck"] }
 bytemuck = { version = "1.15.0", features = ["derive"] }
