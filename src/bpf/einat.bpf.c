@@ -787,7 +787,7 @@ ipv6_update_csum(struct __sk_buff *skb, u32 l4_csum_off, __be32 from_addr[4],
     bpf_l4_csum_replace(skb, l4_csum_off, from_port, to_port, 2);
 #pragma unroll
     for (int i = 0; i < 4; i++) {
-        bpf_l4_csum_replace(skb, l4_csum_off + i * 4, from_addr[i], to_addr[i],
+        bpf_l4_csum_replace(skb, l4_csum_off, from_addr[i], to_addr[i],
                             4 | BPF_F_PSEUDO_HDR);
     }
 }
@@ -801,8 +801,7 @@ ipv6_update_csum_inner(struct __sk_buff *skb, u32 l4_csum_off,
 
 #pragma unroll
     for (int i = 0; i < 4; i++) {
-        bpf_l3_csum_replace(skb, l4_csum_off + i * 4, from_addr[i], to_addr[i],
-                            4);
+        bpf_l3_csum_replace(skb, l4_csum_off, from_addr[i], to_addr[i], 4);
     }
 }
 
@@ -827,15 +826,14 @@ ipv6_update_csum_icmp_err(struct __sk_buff *skb, u32 icmp_csum_off,
 
 #pragma unroll
     for (int i = 0; i < 4; i++) {
-        bpf_l4_csum_replace(skb, icmp_csum_off + i * 4, from_addr[i],
-                            to_addr[i], 4);
+        bpf_l4_csum_replace(skb, icmp_csum_off, from_addr[i], to_addr[i], 4);
     }
     bpf_l4_csum_replace(skb, icmp_csum_off, from_port, to_port, 2);
 
 #pragma unroll
     for (int i = 0; i < 4; i++) {
-        bpf_l4_csum_replace(skb, icmp_csum_off + i * 4, from_addr[i],
-                            to_addr[i], 4 | BPF_F_PSEUDO_HDR);
+        bpf_l4_csum_replace(skb, icmp_csum_off, from_addr[i], to_addr[i],
+                            4 | BPF_F_PSEUDO_HDR);
     }
 }
 
