@@ -43,7 +43,7 @@
           };
           inherit (pkgs) lib;
 
-          crossPackage = { ... }@args: crossPackage' { inherit pkgs; } // args;
+          crossPackage = { ... }@args: crossPackage' ({ inherit pkgs; } // args);
         in
         {
           packages = {
