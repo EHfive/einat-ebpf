@@ -1,4 +1,4 @@
-## OpenWrt
+# OpenWrt
 
 As said in [README](../../README.md), `einat` requires a kernel with BPF and BTF support enabled which is not the default in OpenWrt.
 And `einat` requires running kernel for target architecture has implemented support for BPF-to-BPF calls, which is not the case for MIPS and some other architectures with less maintenance in BPF codebase.
@@ -7,7 +7,7 @@ So if the architecture of your router is not x86-64 or aarch64 or other actively
 
 The following is OpenWrt build configs required for `einat` to work.
 
-### Build Configs
+## Build Configs
 
 Make sure to use latest OpenWrt release or OpenWrt on main branch.
 
@@ -27,7 +27,7 @@ CONFIG_DEBUG_INFO_REDUCED=n
 CONFIG_DEBUG_INFO_BTF=y
 ```
 
-### Kernel Configs
+## Kernel Configs
 
 Additional kernel configs required, you might need to add these to kernel config file manually, see https://openwrt.org/docs/guide-developer/toolchain/use-buildsystem#kernel_configuration_optional .
 
@@ -40,7 +40,7 @@ CONFIG_NET_ACT_BPF=y
 
 See https://github.com/iovisor/bcc/blob/master/docs/kernel_config.md for explanation on these BPF options.
 
-### Setup einat
+## Setup einat
 
 Find out interface names for your router with `ip addr`, it would be `pppoe-wan` or `wan` for external interface and `br-lan` for internal interface in a common OpenWrt setup.
 

@@ -1,8 +1,8 @@
-## Cross-Compilation on Debian
+# Cross-Compilation on Debian
 
 This guide gives example for cross-compiling for aarch64, replace "aarch64" and "arm64" with respective architecture identifier tokens for cross-compiling for other architectures.
 
-### Build Dependencies
+## Build Dependencies
 
 Install `libelf` and `zlib1g` as it's required by `libbpf`. Install `gcc-aarch64-linux-gnu` for cross linking. Install `clang` for bindgen and compile eBPF C code in this project.
 
@@ -18,7 +18,7 @@ Add required target to Rust toolchain:
 rustup target add aarch64-unknown-linux-gnu
 ```
 
-### Target Dependencies
+## Target Dependencies
 
 ```
 dpkg --add-architecture arm64
@@ -26,7 +26,7 @@ apt update
 apt install libelf-dev:arm64 zlib1g-dev:arm64
 ```
 
-### Environment Variables
+## Environment Variables
 
 ```
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="/usr/bin/aarch64-linux-gnu-gcc"
@@ -38,7 +38,7 @@ export CC_aarch64_unknown_linux_gnu="/usr/bin/aarch64-linux-gnu-gcc"
 export CFLAGS_aarch64_unknown_linux_gnu="-I /usr/include/aarch64-linux-gnu -L /usr/lib/aarch64-linux-gnu"
 ```
 
-### Build static binary
+## Build static binary
 
 ```
 cd einat-ebpf

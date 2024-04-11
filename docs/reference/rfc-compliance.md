@@ -1,4 +1,4 @@
-## RFC-compliance
+# RFC-compliance
 
 -   ✅ Compliant or not applicable
 -   ❓ Not applicable or not compliant to a MAY
@@ -7,18 +7,18 @@
 
 If there is no ❌ for a RFC then it compliant to the RFC, and if there is also no ⚠️ for the RFC then it fully-compliant to the RFC.
 
-### RFC 4787
+## RFC 4787
 
 https://datatracker.ietf.org/doc/html/rfc4787#section-12
 
-Compliant except REQ-14.
+Compliant except [REQ-14](#req-14), receiving out-of-order fragments.
 
-#### REQ-1
+### REQ-1
 
 -   A NAT MUST have an "Endpoint-Independent Mapping" behavior
 -   ✅ Compliant.
 
-#### REQ-2
+### REQ-2
 
 -   It is RECOMMENDED that a NAT have an "IP address pooling"
     behavior of "Paired". Note that this requirement is not
@@ -29,7 +29,7 @@ Compliant except REQ-14.
 
 However, with `bpf_fib_lookup_external` enabled `einat` would query routing table to determine initial NAT external address which is similar to "IP address pooling". And if there is some policy-based routing rule(i.e. `ip rule`) selects preferred external address that is destination dependent, the "Paired" behavior would be broken.
 
-#### REQ-3
+### REQ-3
 
 -   A NAT MUST NOT have a "Port assignment" behavior of "Port
     overloading"
@@ -45,15 +45,15 @@ However, with `bpf_fib_lookup_external` enabled `einat` would query routing tabl
     RECOMMENDED that the NAT's source port be in that range.
 -   ⚠️ Not compliant.
 
-`einat` would try preserving the original port number if possible and then do random port assignment.
+`einat` would try preserving the original port number if possible and then do sequential port assignment.
 
-#### REQ-4
+### REQ-4
 
 -   It is RECOMMENDED that a NAT have a "Port parity
     preservation" behavior of "Yes".
 -   ⚠️ Not compliant.
 
-#### REQ-5
+### REQ-5
 
 -   A NAT UDP mapping timer MUST NOT expire in less than two
     minutes, unless REQ-5a applies.
@@ -80,7 +80,7 @@ However, with `bpf_fib_lookup_external` enabled `einat` would query routing tabl
 
 We default the UDP timeout to 5 minutes only for traffic seen packets from both inbound and outbound direction.
 
-#### REQ-6
+### REQ-6
 
 -   The NAT mapping Refresh Direction MUST have a "NAT Outbound
     refresh behavior" of "True".
@@ -94,7 +94,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
 
 `einat` only allows inbound refreshing for ICMP query packets.
 
-#### REQ-7
+### REQ-7
 
 -   A NAT device whose external IP interface can be configured
     dynamically MUST either (1) Automatically ensure that its internal
@@ -104,7 +104,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     numerically conflict with the internal network.
 -   ✅ Compliant with proper network configuration.
 
-#### REQ-8
+### REQ-8
 
 -   If application transparency is most important, it is
     RECOMMENDED that a NAT have "Endpoint-Independent Filtering"
@@ -113,7 +113,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     Filtering" behavior.
 -   ✅ Compliant.
 
-#### REQ-9
+### REQ-9
 
 -   A NAT MUST support "Hairpinning".
 -   ✅ Compliant with proper `einat` configuration.
@@ -124,7 +124,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     and port".
 -   ✅ Compliant.
 
-#### REQ-10
+### REQ-10
 
 -   To eliminate interference with UNSAF NAT traversal
     mechanisms and allow integrity protection of UDP communications,
@@ -139,7 +139,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     the NAT administrator to enable or disable each ALG separately
 -   ❓ Not applicable.
 
-#### REQ-11
+### REQ-11
 
 -   A NAT MUST have deterministic behavior, i.e., it MUST NOT
     change the NAT translation (Section 4) or the Filtering
@@ -147,7 +147,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     conditions.
 -   ✅ Compliant.
 
-#### REQ-12
+### REQ-12
 
 -   Receipt of any sort of ICMP message MUST NOT terminate the
     NAT mapping.
@@ -167,7 +167,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
     Unreachable messages.
 -   ✅ Compliant.
 
-#### REQ-13
+### REQ-13
 
 -   If the packet received on an internal IP address has DF=1,
     the NAT MUST send back an ICMP message "Fragmentation needed and
@@ -182,7 +182,7 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
 
 `einat` just filters and NAT the packet and does not changes the packet size so this is not `einat`'s responsibility to handle fragmentation.
 
-#### REQ-14
+### REQ-14
 
 -   A NAT MUST support receiving in-order and out-of-order
     fragments, so it MUST have "Received Fragment Out of Order"
@@ -200,13 +200,13 @@ We default the UDP timeout to 5 minutes only for traffic seen packets from both 
 `einat` only does fragments tracking without reassemble the full packet.
 So if the first fragment received is not the first fragment("More Fragments"=1 and offset=0) containing layer 4 header in sequence, previously received out-of-order fragments can not be forwarded to NATed destination.
 
-### RFC 5508
+## RFC 5508
 
 https://datatracker.ietf.org/doc/html/rfc5508#section-9
 
 Compliant.
 
-#### REQ-1
+### REQ-1
 
 -   Unless explicitly overridden by local policy, a NAT device
     MUST permit ICMP Queries and their associated responses, when
@@ -220,7 +220,7 @@ Compliant.
     host independent.
 -   ✅ Compliant.
 
-#### REQ-2
+### REQ-2
 
 -   An ICMP Query session timer MUST NOT expire in less than 60
     seconds.
@@ -234,7 +234,7 @@ Compliant.
 
 Currently we use the same timeout value for UDP and ICMP.
 
-#### REQ-3
+### REQ-3
 
 -   When an ICMP Error packet is received, if the ICMP checksum
     fails to validate, the NAT SHOULD silently drop the ICMP Error
@@ -274,7 +274,7 @@ For "REQ-3","REQ-3a" and "REQ-3c", `einat` does not validate checksum of any typ
 
 `einat` does not handles ICMP extensions, it only parses the first ICMP extension as traditional ICMP Error packet.
 
-#### REQ-4
+### REQ-4
 
 -   If a NAT device receives an ICMP Error packet from an external
     realm, and the NAT device does not have an active mapping for
@@ -292,7 +292,7 @@ For "REQ-3","REQ-3a" and "REQ-3c", `einat` does not validate checksum of any typ
     after translation.
 -   ✅ Compliant.
 
-#### REQ-5
+### REQ-5
 
 -   If a NAT device receives an ICMP Error packet from the private
     realm, and the NAT does not have an active mapping for the
@@ -323,7 +323,7 @@ So if `bpf_fib_lookup_external` is enabled and the external address of "the inte
 
 See also [RFC 4787, REQ-2](#req-2).
 
-#### REQ-6
+### REQ-6
 
 -   While processing an ICMP Error packet pertaining to an ICMP
     Query or Query response message, a NAT device MUST NOT refresh
@@ -331,7 +331,7 @@ See also [RFC 4787, REQ-2](#req-2).
     payload within the ICMP Error packet.
 -   ✅ Compliant.
 
-#### REQ-7
+### REQ-7
 
 -   NAT devices enforcing Basic NAT ([NAT-TRAD]) MUST support the
     traversal of hairpinned ICMP Query sessions. All NAT devices
@@ -350,7 +350,7 @@ See also [RFC 4787, REQ-2](#req-2).
 `einat` only allows packet with the same destination IP address of the outer IP header and source IP address of the
 embedded IP packet, thus the address after the translation would also be the same.
 
-#### REQ-8
+### REQ-8
 
 -   When a NAT device is unable to establish a NAT Session for a
     new transport-layer (TCP, UDP, ICMP, etc.) flow due to
@@ -362,7 +362,7 @@ embedded IP packet, thus the address after the translation would also be the sam
 
 Tracked in https://github.com/EHfive/einat-ebpf/issues/8.
 
-#### REQ-9
+### REQ-9
 
 -   A NAT device MAY implement a policy control that prevents ICMP
     messages being generated toward certain interface(s).
@@ -370,7 +370,7 @@ Tracked in https://github.com/EHfive/einat-ebpf/issues/8.
     and SHOULDs in REQ-10.
 -   ❓ Not applicable.
 
-#### REQ-10
+### REQ-10
 
 -   Unless overridden by REQ-9's policy, a NAT device needs to
     support ICMP messages as below, some conforming to Section
@@ -397,26 +397,26 @@ Only "Timestamp and Timestamp Reply Messages" and "Parameter Problem Message" ar
 
 -   ❓ Not compliant or ✅ compliant with kernel support.
 
-#### REQ-11
+### REQ-11
 
 -   A NAT MAY drop or appropriately handle Non-QueryError ICMP
     messages. The semantics of Non-QueryError ICMP messages is
     defined in Section 2.
 -   ❓ Not compliant or ✅ compliant with kernel support.
 
-### RFC 5382
+## RFC 5382
 
 https://datatracker.ietf.org/doc/html/rfc5382#section-8
 
 Fully compliant.
 
-#### REQ-1
+### REQ-1
 
 -   A NAT MUST have an "Endpoint-Independent Mapping" behavior
     for TCP.
 -   ✅ Compliant.
 
-#### REQ-2
+### REQ-2
 
 -   A NAT MUST support all valid sequences of TCP packets
     (defined in [RFC0793]) for connections initiated both internally
@@ -427,7 +427,7 @@ Fully compliant.
     open mode of connection initiation.
 -   ✅ Compliant.
 
-#### REQ-3
+### REQ-3
 
 -   If application transparency is most important, it is
     RECOMMENDED that a NAT have an "Endpoint-Independent Filtering"
@@ -450,7 +450,7 @@ Fully compliant.
 
 `einat` has only "Endpoint-Independent Filtering" behavior for any supported protocols.
 
-#### REQ-4
+### REQ-4
 
 -   A NAT MUST NOT respond to an unsolicited inbound SYN packet
     for at least 6 seconds after the packet is received. If during
@@ -470,7 +470,7 @@ Fully compliant.
 
 `einat` drops unsolicited inbound SYN packet by default.
 
-#### REQ-5
+### REQ-5
 
 -   If a NAT cannot determine whether the endpoints of a TCP
     connection are active, it MAY abandon the session if it has been
@@ -481,7 +481,7 @@ Fully compliant.
 -   (a) The value of the NAT idle-timeouts MAY be configurable.
 -   ✅ Compliant.
 
-#### REQ-6
+### REQ-6
 
 -   If a NAT includes ALGs that affect TCP, it is RECOMMENDED
     that all of those ALGs (except for FTP [RFC0959]) be disabled by
@@ -490,43 +490,43 @@ Fully compliant.
 
 Same as [RFC 4787, REQ-10](#req-10).
 
-#### REQ-7
+### REQ-7
 
 -   A NAT MUST NOT have a "Port assignment" behavior of "Port
     overloading" for TCP.
 -   ✅ Compliant.
 
-#### REQ-8
+### REQ-8
 
 -   A NAT MUST support "hairpinning" for TCP.
 -   ✅ Compliant.
 
-#### REQ-9
+### REQ-9
 
 -   If a NAT translates TCP, it SHOULD translate ICMP Destination
     Unreachable (Type 3) messages.
 -   ✅ Compliant.
 
-#### REQ-10
+### REQ-10
 
 -   Receipt of any sort of ICMP message MUST NOT terminate the
     NAT mapping or TCP connection for which the ICMP was generated.
 -   ✅ Compliant.
 
-### RFC 7857
+## RFC 7857
 
 https://datatracker.ietf.org/doc/html/rfc7857
 
 Compliant.
 
-#### TCP Session Tracking
+### TCP Session Tracking
 
 -   The TCP state machine depicted in Figure 1, adapted from
     [RFC6146], SHOULD be implemented by a NAT for TCP session tracking
     purposes.
 -   ✅ Compliant.
 
-#### TCP Transitory Connection Idle-Timeout
+### TCP Transitory Connection Idle-Timeout
 
 -   This document clarifies that a NAT SHOULD provide
     different configurable parameters for configuring the open and
@@ -540,7 +540,7 @@ Compliant.
     minutes is RECOMMENDED.
 -   ✅ Compliant.
 
-#### TCP RST
+### TCP RST
 
 -   Concretely, when the NAT receives a TCP RST matching
     an existing mapping, it MUST translate the packet according to the
@@ -549,53 +549,53 @@ Compliant.
     it if no packets are received during that 4-minute timeout.
 -   ✅ Compliant.
 
-#### Port Overlapping Behavior
+### Port Overlapping Behavior
 
 -   If destination addresses and ports are different for outgoing
     connections started by local clients, a NAT MAY assign the same
     external port as the source ports for the connections.
 -   ❓ Not applicable as `einat` has EIM behavior.
 
-#### Address Pooling Paired
+### Address Pooling Paired
 
 -   ❓ Not applicable.
 
 Same as [RFC 4787, REQ-2](#req-2)
 
-#### EIM Protocol Independence
+### EIM Protocol Independence
 
 -   ❓ Not applicable.
 
 `einat` has "Endpoint-Independent Mapping" behavior for any supported protocols.
 
-#### EIF Protocol Independence
+### EIF Protocol Independence
 
 -   ❓ Not applicable.
 
 `einat` has "Endpoint-Independent Filtering" behavior for any supported protocols.
 
-#### EIF Mapping Refresh
+### EIF Mapping Refresh
 
 -   ❓ Not applicable.
 
-#### Outbound Mapping Refresh and Error Packets
+### Outbound Mapping Refresh and Error Packets
 
 -   In the case of NAT outbound refresh behavior, ICMP Errors or
     TCP RST outbound packets sent as a response to inbound packets
     SHOULD NOT refresh the mapping.
 -   ✅ Compliant.
 
-#### Port Parity
+### Port Parity
 
 -   ❓ Not compliant.
 
-#### Port Randomization
+### Port Randomization
 
 -   ❓ Not applicable.
 
 `einat` would try preserving the original port number if possible and then do random port assignment.
 
-#### IP Identification
+### IP Identification
 
 -   A NAT SHOULD handle the Identification field of translated
     IPv4 packets as specified in [Section 5.3.1 of RFC6864](https://datatracker.ietf.org/doc/html/rfc6864#section-5.3.1).
@@ -603,11 +603,11 @@ Same as [RFC 4787, REQ-2](#req-2)
 
 `einat` uses source address, destination address, layer 4 protocol, interface index and direction in addition to IP ID to distinguish between fragmentation sessions.
 
-#### ICMP Query Mappings Timeout
+### ICMP Query Mappings Timeout
 
 -   ICMP Query mappings MAY be deleted once the last session
     using the mapping is deleted.
--   ✅ Compliant as in `einat` it's the default for all protocols.
+-   ✅ Compliant as this is the default for any protocols in `einat`.
 
 [ICMP-EXT]: https://datatracker.ietf.org/doc/html/rfc4884
 [NAT-TRAD]: https://datatracker.ietf.org/doc/html/rfc3022

@@ -1,4 +1,4 @@
-## Use Cases
+# Use Cases
 
 The following use cases assume:
 
@@ -18,7 +18,7 @@ And we give the following example network configuration:
 
 We call the address of `wan`(`233.252.0.200` here) on router as "external address".
 
-### STUN NAT behavior test
+## STUN NAT behavior test
 
 Install [stuntman](https://github.com/jselbie/stunserver) which contains `stunclient` and `stunserver`.
 
@@ -53,7 +53,7 @@ Filtering test: success
 Nat filtering: Endpoint Independent Filtering
 ```
 
-### STUN-based port mapping with Natter
+## STUN-based port mapping with Natter
 
 [Natter](https://github.com/MikeWang000000/Natter) is a STUN-based port mapping daemon, you can use this tool to hold an external TCP/UDP port and forwarding the traffic to a specified target(e.g. a local TCP listening service).
 
