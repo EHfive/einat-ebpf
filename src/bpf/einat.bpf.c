@@ -178,26 +178,27 @@ static __always_inline bool pkt_allow_initiating_ct(u8 pkt_type) {
 
 static __always_inline int parse_ipv4_packet_light(const struct iphdr *iph,
                                                    struct inet_tuple *tuple,
-                                                   u8 *nexthdr) {
+                                                   u8 *nexthdr, u32 *len_) {
 #define BPF_LOG_TOPIC "parse_ipv4_packet_light"
     if (iph->version != 4) {
-        return -1;
+        return TC_ACT_SHOT;
     }
     inet_addr_set_ip(&tuple->saddr, iph->saddr);
     inet_addr_set_ip(&tuple->daddr, iph->daddr);
     *nexthdr = iph->protocol;
     if (iph->frag_off & bpf_htons(IP_OFFSET)) {
-        return -1;
+        return TC_ACT_SHOT;
     }
-    return (iph->ihl * 4);
+    *len_ = iph->ihl * 4;
+    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 
-static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
-                                             const struct iphdr *iph) {
+static __always_inline int
+parse_ipv4_packet(struct packet_info *pkt, const struct iphdr *iph, u32 *len_) {
 #define BPF_LOG_TOPIC "parse_ipv4_packet"
     if (iph->version != 4) {
-        return -1;
+        return TC_ACT_SHOT;
     }
     inet_addr_set_ip(&pkt->tuple.saddr, iph->saddr);
     inet_addr_set_ip(&pkt->tuple.daddr, iph->daddr);
@@ -214,22 +215,22 @@ static __always_inline int parse_ipv4_packet(struct packet_info *pkt,
     }
     pkt->frag_id = bpf_ntohs(iph->id);
     pkt->nexthdr = iph->protocol;
-    return (iph->ihl * 4);
+    *len_ = iph->ihl * 4;
+    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 
 #ifdef FEAT_IPV6
-static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
-                                              struct inet_tuple *tuple,
-                                              u8 *nexthdr_,
-                                              struct frag_hdr *frag_hdr) {
+static __always_inline int
+_parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off, struct inet_tuple *tuple,
+                   u8 *nexthdr_, struct frag_hdr *frag_hdr, u32 *len_) {
 #define BPF_LOG_TOPIC "_parse_ipv6_packet"
     struct ipv6hdr *ip6h;
     if (VALIDATE_PULL(skb, &ip6h, l3_off, sizeof(*ip6h))) {
-        return -1;
+        return TC_ACT_SHOT;
     }
     if (ip6h->version != 6) {
-        return -1;
+        return TC_ACT_SHOT;
     }
     inet_addr_set_ip6(&tuple->saddr, ip6h->saddr.in6_u.u6_addr32);
     inet_addr_set_ip6(&tuple->daddr, ip6h->daddr.in6_u.u6_addr32);
@@ -246,7 +247,7 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
         switch (nexthdr) {
         case NEXTHDR_AUTH:
             // Just passthrough IPSec packet
-            return -1;
+            return TC_ACT_UNSPEC;
         case NEXTHDR_FRAGMENT:
             frag_hdr_off = len;
         case NEXTHDR_HOP:
@@ -254,7 +255,7 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
         case NEXTHDR_DEST: {
             if (bpf_skb_load_bytes(skb, l3_off + len, &opthdr,
                                    sizeof(opthdr))) {
-                return -1;
+                return TC_ACT_SHOT;
             }
             len += (opthdr.hdrlen + 1) * 8;
             nexthdr = opthdr.nexthdr;
@@ -271,14 +272,14 @@ static __always_inline int _parse_ipv6_packet(struct __sk_buff *skb, u32 l3_off,
     case NEXTHDR_ICMP:
         goto found_upper_layer;
     default:
-        return -1;
+        return TC_ACT_UNSPEC;
     }
 
 found_upper_layer:
     if (frag_hdr_off) {
         if (bpf_skb_load_bytes(skb, l3_off + frag_hdr_off, frag_hdr,
                                sizeof(*frag_hdr))) {
-            return -1;
+            return TC_ACT_SHOT;
         }
     } else {
         frag_hdr->nexthdr = 0;
@@ -288,39 +289,41 @@ found_upper_layer:
     }
 
     *nexthdr_ = nexthdr;
-    return len;
+    *len_ = len;
+    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 
 static __always_inline int parse_ipv6_packet_light(struct __sk_buff *skb,
                                                    u32 l3_off,
                                                    struct inet_tuple *tuple,
-                                                   u8 *nexthdr) {
+                                                   u8 *nexthdr, u32 *len_) {
 #define BPF_LOG_TOPIC "parse_ipv6_packet_light"
 
     struct frag_hdr frag_hdr;
-    int len = _parse_ipv6_packet(skb, l3_off, tuple, nexthdr, &frag_hdr);
-    if (len < 0) {
-        return -1;
+    int ret = _parse_ipv6_packet(skb, l3_off, tuple, nexthdr, &frag_hdr, len_);
+    if (ret != TC_ACT_OK) {
+        return ret;
     }
 
     if (frag_hdr.frag_off & bpf_htons(IPV6_FRAG_OFFSET)) {
-        return -1;
+        return TC_ACT_SHOT;
     }
-    return len;
+    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 
-static __always_inline int
-parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
+static __always_inline int parse_ipv6_packet(struct __sk_buff *skb,
+                                             struct packet_info *pkt,
+                                             u32 l3_off, u32 *len_) {
 #define BPF_LOG_TOPIC "parse_ipv6_packet"
     pkt->is_ipv4 = false;
 
     struct frag_hdr frag_hdr;
-    int len =
-        _parse_ipv6_packet(skb, l3_off, &pkt->tuple, &pkt->nexthdr, &frag_hdr);
-    if (len < 0) {
-        return -1;
+    int ret = _parse_ipv6_packet(skb, l3_off, &pkt->tuple, &pkt->nexthdr,
+                                 &frag_hdr, len_);
+    if (ret != TC_ACT_OK) {
+        return ret;
     }
 
     if (frag_hdr.frag_off) {
@@ -343,7 +346,7 @@ parse_ipv6_packet(struct __sk_buff *skb, struct packet_info *pkt, u32 l3_off) {
         pkt->frag_off = 0;
         pkt->frag_id = 0;
     }
-    return len;
+    return TC_ACT_OK;
 #undef BPF_LOG_TOPIC
 }
 #endif
@@ -401,23 +404,28 @@ static __always_inline __be16 get_icmpx_query_id(struct icmphdr *icmph) {
 static __always_inline int parse_packet_light(struct __sk_buff *skb,
                                               bool is_ipv4, u32 l3_off,
                                               struct inet_tuple *tuple,
-                                              u8 *nexthdr, int *l3_hdr_len) {
+                                              u8 *nexthdr, u32 *l3_hdr_len) {
 #define BPF_LOG_TOPIC "parse_packet_light"
+    int ret;
     if (is_ipv4) {
         struct iphdr *iph;
         if (VALIDATE_PULL(skb, &iph, l3_off, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
-        *l3_hdr_len = parse_ipv4_packet_light(iph, tuple, nexthdr);
+        ret = parse_ipv4_packet_light(iph, tuple, nexthdr, l3_hdr_len);
+        if (ret != TC_ACT_OK) {
+            return ret;
+        }
     } else {
 #ifdef FEAT_IPV6
-        *l3_hdr_len = parse_ipv6_packet_light(skb, l3_off, tuple, nexthdr);
+        ret = parse_ipv6_packet_light(skb, l3_off, tuple, nexthdr,
+                                      (u32 *)l3_hdr_len);
+        if (ret != TC_ACT_OK) {
+            return ret;
+        }
 #else
         return TC_ACT_UNSPEC;
 #endif
-    }
-    if (*l3_hdr_len < 0) {
-        return TC_ACT_SHOT;
     }
 
     int l4_off = l3_off + *l3_hdr_len;
@@ -467,23 +475,26 @@ static __always_inline int parse_packet(struct __sk_buff *skb, bool is_ipv4,
                                         u32 l3_off, struct packet_info *pkt) {
 #define BPF_LOG_TOPIC "parse_packet"
 
-    int l3_header_len;
+    int ret;
+    u32 l3_header_len;
     if (is_ipv4) {
         struct iphdr *iph;
         if (VALIDATE_PULL(skb, &iph, l3_off, sizeof(*iph))) {
             return TC_ACT_SHOT;
         }
-        l3_header_len = parse_ipv4_packet(pkt, iph);
+        ret = parse_ipv4_packet(pkt, iph, &l3_header_len);
+        if (ret != TC_ACT_OK) {
+            return TC_ACT_UNSPEC;
+        }
     } else {
 #ifdef FEAT_IPV6
-        l3_header_len = parse_ipv6_packet(skb, pkt, l3_off);
+        ret = parse_ipv6_packet(skb, pkt, l3_off, &l3_header_len);
+        if (ret != TC_ACT_OK) {
+            return TC_ACT_UNSPEC;
+        }
 #else
         return TC_ACT_UNSPEC;
 #endif
-    }
-
-    if (l3_header_len < 0) {
-        return TC_ACT_SHOT;
     }
 
     pkt->pkt_type = PKT_CONNLESS;
@@ -529,7 +540,7 @@ static __always_inline int parse_packet(struct __sk_buff *skb, bool is_ipv4,
         switch (ret) {
         case ICMP_ERROR_MSG: {
             struct inet_tuple err_tuple = {};
-            int err_l3_hdr_len;
+            u32 err_l3_hdr_len;
             ret = parse_packet_light(
                 skb, IS_IPV4(pkt), icmpx_err_l3_offset(pkt->l4_off), &err_tuple,
                 &pkt->nexthdr, &err_l3_hdr_len);
