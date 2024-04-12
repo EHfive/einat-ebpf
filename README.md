@@ -1,4 +1,6 @@
 # eBPF-based Endpoint-Independent NAT
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FEHfive%2Feinat-ebpf.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FEHfive%2Feinat-ebpf?ref=badge_shield)
+
 
 This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation) on TC egress and ingress hooks.
 
@@ -112,3 +114,7 @@ Sources under ./src/bpf/kernel are derived from Linux kernel, hence they are GPL
 For other files under this project, unless specified, they are GPL-2.0-or-later licensed.
 
 Notice our BPF program calls into GPL-licensed kernel functions so you need to choose GPL-2.0-only license to distribute it.
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FEHfive%2Feinat-ebpf.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FEHfive%2Feinat-ebpf?ref=badge_large)
