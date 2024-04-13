@@ -65,6 +65,7 @@ OPTIONS:
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
       --bpf-log <level>        BPF tracing log level, 0 to 5, defaults to 0, disabled
+  -v, --version                Print einat version
 ```
 
 You would only need to specify external interface name in a minimal setup, and `einat` would select an external IP address on specified interface and reconfigures automatically.

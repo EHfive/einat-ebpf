@@ -37,6 +37,7 @@ OPTIONS:
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
       --bpf-log <level>        BPF tracing log level, 0 to 5, defaults to 0, disabled
+  -v, --version                Print einat version
 ";
 
 #[derive(Default)]
@@ -58,6 +59,10 @@ fn parse_env_args() -> Result<Args> {
         match opt {
             Short('h') | Long("help") => {
                 print!("{}", HELP);
+                std::process::exit(0);
+            }
+            Short('v') | Long("version") => {
+                println!("v{}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             Short('c') | Long("config") => {
