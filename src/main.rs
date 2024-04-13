@@ -32,7 +32,6 @@ OPTIONS:
   -h, --help                   Print this message
   -c, --config <file>          Path to configuration file
   -i, --ifname <name>          External network interface name, e.g. eth0
-      --ifindex <index>        External network interface index number, e.g. 2
       --nat44                  Enable NAT44/NAPT44 for specified network interface
       --nat66                  Enable NAT66/NAPT66 for specified network interface
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
@@ -43,7 +42,6 @@ OPTIONS:
 #[derive(Default)]
 struct Args {
     config_file: Option<PathBuf>,
-    if_index: Option<u32>,
     if_name: Option<String>,
     nat44: bool,
     nat66: bool,
@@ -67,9 +65,6 @@ fn parse_env_args() -> Result<Args> {
             }
             Short('i') | Long("ifname") => {
                 args.if_name = Some(parser.value()?.parse()?);
-            }
-            Long("ifindex") => {
-                args.if_index = Some(parser.value()?.parse()?);
             }
             Long("nat44") => {
                 args.nat44 = true;
@@ -383,20 +378,14 @@ fn main() -> Result<()> {
         Config::default()
     };
 
-    if args.if_index.is_some() || args.if_name.is_some() {
+    if let Some(if_name) = args.if_name {
         if args.config_file.is_some() {
             return Err(anyhow::anyhow!(
                 "Combining interface configuration from CLI options with configuration file is not allowed"
             ));
         }
 
-        let interface = if let Some(if_index) = args.if_index {
-            NetIfId::Index { if_index }
-        } else if let Some(if_name) = args.if_name {
-            NetIfId::Name { if_name }
-        } else {
-            unreachable!()
-        };
+        let interface = NetIfId::Name { if_name };
 
         let nat44 = args.nat44 || !args.nat66;
         let nat66 = args.nat66;

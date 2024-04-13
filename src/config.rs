@@ -104,13 +104,14 @@ impl ConfigExternal {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum NetIfId {
-    Index { if_index: u32 },
     Name { if_name: String },
 }
 
 impl Default for NetIfId {
     fn default() -> Self {
-        Self::Index { if_index: 0 }
+        Self::Name {
+            if_name: Default::default(),
+        }
     }
 }
 
@@ -190,7 +191,6 @@ pub struct Config {
 impl NetIfId {
     pub fn resolve_index(&self) -> Result<u32> {
         match self {
-            NetIfId::Index { if_index } => Ok(*if_index),
             NetIfId::Name { if_name } => Ok(if_nametoindex(if_name.as_str())?),
         }
     }

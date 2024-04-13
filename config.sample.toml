@@ -26,10 +26,7 @@ ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
 # External or outbound interface on which NAT would be performed.
-# Interface name would be resolved to interface index
 if_name = "eth0"
-# `if_index` would be preferred if both `if_name` and `if_index` are specified
-if_index = 2
 # Enable NAPT44
 nat44 = true
 # Enable NAPT66
