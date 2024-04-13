@@ -368,9 +368,6 @@ icmp_in_ranges = ["0-9999"]
 icmp_out_ranges = ["1000-65535"]
 
 [[interfaces]]
-if_index = 3
-
-[[interfaces]]
 if_name = "eth0"
 nat44 = true
 nat66 = false
