@@ -13,7 +13,9 @@ use ipnet::Ipv6Net;
 use netlink_packet_core::NetlinkPayload;
 use netlink_packet_route::{
     address::AddressAttribute,
-    link::{InfoKind, LinkAttribute, LinkInfo as AttrLinkInfo, LinkLayerType, LinkMessage},
+    link::{
+        InfoKind, LinkAttribute, LinkFlag, LinkInfo as AttrLinkInfo, LinkLayerType, LinkMessage,
+    },
     neighbour::{NeighbourMessage, NeighbourState},
     route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
     rule::{RuleAction, RuleAttribute, RuleMessage},
@@ -22,7 +24,7 @@ use netlink_packet_route::{
 use netlink_sys::{AsyncSocket, SocketAddr};
 use rtnetlink::{new_connection, Handle, IpVersion, NeighbourAddRequest, RouteAddRequest};
 use tokio::task::JoinHandle;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::config::IpProtocol;
 use crate::utils::IpNetwork;
@@ -48,7 +50,7 @@ const fn nl_mgrp(group: u32) -> u32 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketEncap {
     BareIp,
     Ethernet,
@@ -72,6 +74,14 @@ pub struct RouteHelper {
 }
 
 impl LinkInfo {
+    pub fn index(&self) -> u32 {
+        self.0.header.index
+    }
+
+    pub fn is_up(&self) -> bool {
+        self.0.header.flags.contains(&LinkFlag::Up)
+    }
+
     pub fn address(&self) -> Option<&Vec<u8>> {
         self.0.attributes.iter().find_map(|attr| {
             if let LinkAttribute::Address(addr) = attr {
@@ -174,7 +184,28 @@ impl LinkInfo {
 const ROUTE_LOCAL_TABLE_ID: u32 = 255;
 
 impl RouteHelper {
-    pub async fn query_link_info(&self, if_index: u32) -> Result<LinkInfo> {
+    pub async fn query_link_info(&self, if_name: &str) -> Result<Option<LinkInfo>> {
+        let link = self
+            .handle
+            .link()
+            .get()
+            .match_name(if_name.to_string())
+            .execute()
+            .try_next()
+            .await;
+        match link {
+            Ok(link) => Ok(link.map(LinkInfo)),
+            Err(e) => {
+                if route_err_is_no_dev(&e) {
+                    Ok(None)
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
+    }
+
+    async fn query_link_info_by_index(&self, if_index: u32) -> Result<LinkInfo> {
         let link = self
             .handle
             .link()
@@ -320,6 +351,8 @@ impl RouteHelper {
 
 pub enum MonitorEvent {
     ChangeAddress { if_index: u32 },
+    ChangeLink { if_name: String },
+    DelLink { if_name: String },
 }
 
 pub trait RouteIpNetwork: IpNetwork + Copy + Eq {
@@ -427,24 +460,44 @@ pub struct HairpinRouting<N> {
     rt_helper: RouteHelper,
     external_if_index: u32,
     table_id: u32,
+    ip_rule_pref: u32,
+    local_ip_rule_pref: u32,
+    internal_if_names: Vec<String>,
+    ip_protocols: Vec<IpProtocol>,
     hairpin_dests: Vec<N>,
     rules: Vec<RuleMessage>,
     routes: Vec<RouteDescriber<N>>,
     neighs: Vec<NeighbourMessage>,
     cache_ll_addr: Option<Option<Vec<u8>>>,
+    hairpin_rule_configured: bool,
 }
 
 impl<N: RouteIpNetwork> HairpinRouting<N> {
-    pub fn new(rt_helper: RouteHelper, external_if_index: u32, table_id: u32) -> Self {
+    pub fn new(
+        rt_helper: RouteHelper,
+        external_if_index: u32,
+        table_id: u32,
+        ip_rule_pref: u32,
+        local_ip_rule_pref: u32,
+        mut internal_if_names: Vec<String>,
+        mut ip_protocols: Vec<IpProtocol>,
+    ) -> Self {
+        internal_if_names.dedup();
+        ip_protocols.dedup();
         Self {
             rt_helper,
             external_if_index,
             table_id,
+            ip_rule_pref,
+            local_ip_rule_pref,
+            internal_if_names,
+            ip_protocols,
             hairpin_dests: Default::default(),
             rules: Default::default(),
             routes: Default::default(),
             neighs: Default::default(),
             cache_ll_addr: Default::default(),
+            hairpin_rule_configured: false,
         }
     }
 
@@ -452,53 +505,31 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         &self.rt_helper.handle
     }
 
-    async fn configure_(
-        &mut self,
-        ip_rule_pref: u32,
-        local_ip_rule_pref: u32,
-        mut internal_if_names: Vec<String>,
-        mut ip_protocols: Vec<IpProtocol>,
-        hairpin_dests: Vec<N>,
-    ) -> Result<()> {
-        assert!(self.neighs.is_empty() && self.rules.is_empty() && self.hairpin_dests.is_empty());
-
+    async fn reconfigure_(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
         self.reconfigure_dests(hairpin_dests).await?;
 
-        internal_if_names.dedup();
-        if !internal_if_names.is_empty() {
-            self.rt_helper
-                .deprioritize_local_ip_rule(N::IS_IPV4, local_ip_rule_pref)
-                .await?;
-        }
-
-        ip_protocols.dedup();
-        for iif_name in internal_if_names {
-            for &protocol in ip_protocols.iter() {
-                self.add_rule(&iif_name, protocol.into(), ip_rule_pref)
+        if !self.hairpin_rule_configured {
+            if !self.internal_if_names.is_empty() {
+                self.rt_helper
+                    .deprioritize_local_ip_rule(N::IS_IPV4, self.local_ip_rule_pref)
                     .await?;
             }
+
+            for iif_name in self.internal_if_names.clone() {
+                for protocol in self.ip_protocols.clone() {
+                    self.add_rule(&iif_name, protocol.into(), self.ip_rule_pref)
+                        .await?;
+                }
+            }
+
+            self.hairpin_rule_configured = true;
         }
 
         Ok(())
     }
 
-    pub async fn configure(
-        &mut self,
-        ip_rule_pref: u32,
-        local_ip_rule_pref: u32,
-        internal_if_names: Vec<String>,
-        ip_protocols: Vec<IpProtocol>,
-        hairpin_dests: Vec<N>,
-    ) -> Result<()> {
-        let res = self
-            .configure_(
-                ip_rule_pref,
-                local_ip_rule_pref,
-                internal_if_names,
-                ip_protocols,
-                hairpin_dests,
-            )
-            .await;
+    pub async fn reconfigure(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
+        let res = self.reconfigure_(hairpin_dests).await;
         if res.is_err() {
             let _ = self.deconfigure().await;
         }
@@ -514,7 +545,11 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             .table_id(self.table_id)
             .output_interface(self.external_if_index);
 
-        dest.route_add_set_dest(req, None).execute().await?;
+        if let Err(e) = dest.route_add_set_dest(req, None).execute().await {
+            if !route_err_is_exist(&e) {
+                return Err(e.into());
+            }
+        }
 
         self.routes.push(RouteDescriber {
             destination: dest,
@@ -546,7 +581,9 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
                 .any(|describer| describer.matches(&route))
             {
                 if let Err(e) = self.handle().route().del(route).execute().await {
-                    warn!("failed to delete route: {}", e);
+                    if !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
+                        error!("failed to delete route: {}", e);
+                    }
                 }
             }
         }
@@ -554,7 +591,9 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
 
         for neigh in core::mem::take(&mut self.neighs) {
             if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
-                warn!("failed to delete neigh entry: {}", e);
+                if !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
+                    error!("failed to delete neigh entry: {}", e);
+                }
             }
         }
 
@@ -606,7 +645,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         }
         let link = self
             .rt_helper
-            .query_link_info(self.external_if_index)
+            .query_link_info_by_index(self.external_if_index)
             .await?;
 
         let ll_addr = if matches!(link.encap(), PacketEncap::Ethernet) {
@@ -633,22 +672,19 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         Ok(ll_addr.clone())
     }
 
-    async fn reconfigure_dests_(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
+    async fn reconfigure_dests(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
+        if self.hairpin_dests == hairpin_dests {
+            return Ok(());
+        }
         self.del_all_route().await?;
 
-        for dest in hairpin_dests {
-            self.add_route(dest).await?;
+        for dest in hairpin_dests.iter() {
+            self.add_route(*dest).await?;
         }
+
+        self.hairpin_dests = hairpin_dests;
 
         Ok(())
-    }
-
-    pub async fn reconfigure_dests(&mut self, hairpin_dests: Vec<N>) -> Result<()> {
-        let res = self.reconfigure_dests_(hairpin_dests).await;
-        if res.is_err() {
-            let _ = self.deconfigure().await;
-        }
-        res
     }
 
     pub async fn deconfigure(&mut self) -> Result<()> {
@@ -657,8 +693,26 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         }
         let _ = self.del_all_route().await;
 
+        self.hairpin_rule_configured = false;
+
         Ok(())
     }
+}
+
+fn link_msg_get_name(msg: LinkMessage) -> Option<String> {
+    let if_index = msg.header.index;
+    let if_name = msg.attributes.into_iter().find_map(|attr| {
+        if let LinkAttribute::IfName(if_name) = attr {
+            Some(if_name)
+        } else {
+            None
+        }
+    });
+    if if_name.is_none() {
+        error!("no interface name in link message of if {}", if_index);
+        return None;
+    };
+    if_name
 }
 
 /// This must be called from Tokio context.
@@ -669,28 +723,37 @@ pub fn spawn_monitor() -> Result<(
 )> {
     let (mut conn, handle, mut group_messages) = new_connection()?;
 
+    let groups = nl_mgrp(libc::RTNLGRP_IPV4_IFADDR) | nl_mgrp(libc::RTNLGRP_LINK);
     #[cfg(feature = "ipv6")]
-    let groups = nl_mgrp(libc::RTNLGRP_IPV4_IFADDR) | nl_mgrp(libc::RTNLGRP_IPV6_IFADDR);
-    #[cfg(not(feature = "ipv6"))]
-    let groups = nl_mgrp(libc::RTNLGRP_IPV4_IFADDR);
+    let groups = groups | nl_mgrp(libc::RTNLGRP_IPV6_IFADDR);
 
     let group_addr = SocketAddr::new(0, groups);
     conn.socket_mut().socket_mut().bind(&group_addr)?;
 
     let task = tokio::spawn(conn);
 
+    fn filter_msg(msg: RouteNetlinkMessage) -> Option<MonitorEvent> {
+        use RouteNetlinkMessage::*;
+        let event = match msg {
+            NewAddress(msg) | DelAddress(msg) => MonitorEvent::ChangeAddress {
+                if_index: msg.header.index,
+            },
+            NewLink(msg) => MonitorEvent::ChangeLink {
+                if_name: link_msg_get_name(msg)?,
+            },
+            DelLink(msg) => MonitorEvent::DelLink {
+                if_name: link_msg_get_name(msg)?,
+            },
+            _ => return None,
+        };
+        Some(event)
+    }
+
     let events = async_stream::stream!({
         while let Some((msg, _)) = group_messages.next().await {
             if let NetlinkPayload::InnerMessage(msg) = msg.payload {
-                match msg {
-                    RouteNetlinkMessage::NewAddress(msg)
-                    | RouteNetlinkMessage::DelAddress(msg)
-                    | RouteNetlinkMessage::GetAddress(msg) => {
-                        yield MonitorEvent::ChangeAddress {
-                            if_index: msg.header.index,
-                        };
-                    }
-                    _ => (),
+                if let Some(event) = filter_msg(msg) {
+                    yield event;
                 }
             }
         }
@@ -699,15 +762,27 @@ pub fn spawn_monitor() -> Result<(
     Ok((task, RouteHelper { handle }, events))
 }
 
-fn route_err_is_exist(e: &rtnetlink::Error) -> bool {
+fn route_err_is(e: &rtnetlink::Error, err_code: i32) -> bool {
     if let rtnetlink::Error::NetlinkError(e) = e {
         if let Some(code) = e.code {
-            if code.get() == -libc::EEXIST {
+            if -code.get() == err_code {
                 return true;
             }
         }
     }
     false
+}
+
+fn route_err_is_exist(e: &rtnetlink::Error) -> bool {
+    route_err_is(e, libc::EEXIST)
+}
+
+fn route_err_is_no_entry(e: &rtnetlink::Error) -> bool {
+    route_err_is(e, libc::ENOENT)
+}
+
+fn route_err_is_no_dev(e: &rtnetlink::Error) -> bool {
+    route_err_is(e, libc::ENODEV)
 }
 
 fn rule_set_protocol_kernel(rule: &mut RuleMessage) {
@@ -768,7 +843,7 @@ mod tests {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
-                rt_helper.query_link_info(1).await.unwrap();
+                rt_helper.query_link_info_by_index(1).await.unwrap();
             })
             .await
             .unwrap();

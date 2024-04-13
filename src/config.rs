@@ -10,7 +10,6 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use nix::net::if_::if_nametoindex;
 use serde::de::Error as DeError;
 use serde::{de::Visitor, Deserialize};
 
@@ -101,20 +100,6 @@ impl ConfigExternal {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum NetIfId {
-    Name { if_name: String },
-}
-
-impl Default for NetIfId {
-    fn default() -> Self {
-        Self::Name {
-            if_name: Default::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Timeout(pub u64);
 
@@ -140,10 +125,9 @@ pub struct ConfigHairpinRoute {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ConfigNetIf {
-    #[serde(flatten)]
-    pub interface: NetIfId,
+    pub if_name: String,
     #[serde(default)]
     pub nat44: bool,
     #[serde(default)]
@@ -186,14 +170,6 @@ pub struct Config {
     pub defaults: ConfigDefaults,
     #[serde(default)]
     pub interfaces: Vec<ConfigNetIf>,
-}
-
-impl NetIfId {
-    pub fn resolve_index(&self) -> Result<u32> {
-        match self {
-            NetIfId::Name { if_name } => Ok(if_nametoindex(if_name.as_str())?),
-        }
-    }
 }
 
 impl From<Timeout> for u64 {

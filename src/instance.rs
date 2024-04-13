@@ -76,7 +76,6 @@ struct External {
 
 #[derive(Debug)]
 pub struct InstanceConfig {
-    if_index: u32,
     v4_no_snat_dests: Vec<Ipv4Net>,
     #[cfg(feature = "ipv6")]
     v6_no_snat_dests: Vec<Ipv6Net>,
@@ -660,7 +659,6 @@ impl RuntimeV6Config {
 
 impl InstanceConfig {
     pub fn try_from(
-        if_index: u32,
         if_encap: PacketEncap,
         if_config: &ConfigNetIf,
         defaults: &ConfigDefaults,
@@ -675,10 +673,7 @@ impl InstanceConfig {
                 ))
             }
             PacketEncap::Unknown => {
-                warn!(
-                    "unknown interface packet encapsulation type for if {}, fallback to no encap",
-                    if_index
-                );
+                warn!("unknown interface packet encapsulation type, fallback to no encap");
                 false
             }
         };
@@ -759,7 +754,6 @@ impl InstanceConfig {
             RuntimeV6Config::from(&v6_no_snat_dests, &externals, &addresses.ipv6);
 
         Ok(Self {
-            if_index,
             v4_no_snat_dests,
             #[cfg(feature = "ipv6")]
             v6_no_snat_dests,
@@ -769,12 +763,6 @@ impl InstanceConfig {
             #[cfg(feature = "ipv6")]
             runtime_v6_config,
         })
-    }
-
-    pub fn is_static(&self) -> bool {
-        self.externals
-            .iter()
-            .all(|external| matches!(external.address, AddressOrMatcher::Static { .. }))
     }
 
     pub fn load(self) -> Result<Instance> {
@@ -838,30 +826,38 @@ impl Instance {
         self.config.runtime_v6_config.hairpin_dests()
     }
 
-    fn ingress_tc_hook(&self) -> TcHook {
+    fn ingress_tc_hook(&self, if_index: u32) -> TcHook {
         let progs = self.skel.progs();
         TcHookBuilder::new(progs.ingress_rev_snat().as_fd())
-            .ifindex(self.config.if_index as _)
+            .ifindex(if_index as _)
             .replace(true)
             .handle(1)
             .priority(1)
             .hook(TC_INGRESS)
     }
 
-    fn egress_tc_hook(&self) -> TcHook {
+    fn egress_tc_hook(&self, if_index: u32) -> TcHook {
         let progs = self.skel.progs();
         TcHookBuilder::new(progs.egress_snat().as_fd())
-            .ifindex(self.config.if_index as _)
+            .ifindex(if_index as _)
             .replace(true)
             .handle(1)
             .priority(1)
             .hook(TC_EGRESS)
     }
 
-    pub fn attach(&mut self) -> Result<()> {
-        self.attached_ingress_hook = Some(self.ingress_tc_hook().create()?.attach()?);
-        self.attached_egress_hook = Some(self.egress_tc_hook().attach()?);
+    fn attach_(&mut self, if_index: u32) -> Result<()> {
+        self.attached_ingress_hook = Some(self.ingress_tc_hook(if_index).create()?.attach()?);
+        self.attached_egress_hook = Some(self.egress_tc_hook(if_index).attach()?);
         Ok(())
+    }
+
+    pub fn attach(&mut self, if_index: u32) -> Result<()> {
+        let res = self.attach_(if_index);
+        if res.is_err() {
+            let _ = self.detach();
+        }
+        res
     }
 
     pub fn detach(&mut self) -> Result<()> {
