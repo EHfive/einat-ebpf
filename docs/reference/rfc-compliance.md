@@ -1,6 +1,6 @@
 # RFC-compliance
 
--   ✅ Compliant or not applicable
+-   ✅ Compliant
 -   ❓ Not applicable or not compliant to a MAY
 -   ⚠️ Not compliant to a SHOULD or RECOMMENDED
 -   ❌ Not compliant to a MUST
@@ -593,7 +593,7 @@ Same as [RFC 4787, REQ-2](#req-2)
 
 -   ❓ Not applicable.
 
-`einat` would try preserving the original port number if possible and then do random port assignment.
+`einat` would try preserving the original port number if possible and then do sequential port assignment.
 
 ### IP Identification
 
@@ -601,7 +601,7 @@ Same as [RFC 4787, REQ-2](#req-2)
     IPv4 packets as specified in [Section 5.3.1 of RFC6864](https://datatracker.ietf.org/doc/html/rfc6864#section-5.3.1).
 -   ✅ Compliant.
 
-`einat` uses source address, destination address, layer 4 protocol, interface index and direction in addition to IP ID to distinguish between fragmentation sessions.
+`einat` uses source address, destination address, layer 4 protocol number, interface index and direction in addition to IP ID to distinguish between fragmentation sessions.
 
 ### ICMP Query Mappings Timeout
 

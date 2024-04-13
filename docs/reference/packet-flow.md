@@ -27,11 +27,11 @@ Also the corresponding CT record would be added or updated.
 
 ## NAT records
 
-There is 2 types of records that `einat` uses for tracking NAT state, binding record and conntrack(CT) record, which aligns "Binding Information Bases" record and Session Tables record defined in [RFC 6146](https://datatracker.ietf.org/doc/html/rfc6146#section-3) respectively.
+There is 2 types of records that `einat` uses for tracking NAT state, binding record and conntrack(CT) record, which aligns "Binding Information Bases" record and "Session Tables" record defined in [RFC 6146](https://datatracker.ietf.org/doc/html/rfc6146#section-3) respectively.
 
 ### Binding record
 
-The binding record tracks port mapping of `(internal source address, internal source address) <--> (external source address, external source port)`, which is going to be used for NAT. The binding record also has a `use` counter for tracking outbound CTs referencing it and a `ref` counter for tracking either inbound or outbound CTs referencing it.
+The binding record tracks port mapping of `(internal source address, internal source address) <--> (external source address, external source port)`, which is going to be used for NAT. The binding record also has a `use` counter for tracking outbound CTs referencing it and a `ref` counter for tracking any inbound or outbound CTs referencing it.
 
 A new inbound CT record can only be created if the binding has outbound CTs referencing it, i.e. the `use` counter is not zero.
 
@@ -41,11 +41,13 @@ If the `ref` counter becomes zero, the binding would be deleted.
 
 The CT record tracks connection of `(internal source address, internal source address, destination address and port) <--> (external source address, external source port, destination address and port)`, and the state and lifetime of the connection.
 
-An inbound CT is a CT initialed from ingress and an outbound is a CT initiated from egress. An inbound CT upgrades to outbound CT if there is valid traffic for the connection that inbound CT tracks going through egress.
+An inbound CT is a CT initialed from ingress and an outbound CT is a CT initiated from egress. An inbound CT upgrades to outbound CT if there is valid traffic for the connection that inbound CT tracks going through egress.
 
 The CT state and lifetime changes based on traffic direction and packet type(e.g. TCP SYN, TCP RESET ...).
 
-Note that neither binding record or CT record are dependent to Netfilter conntrack system, they are independently created by `einat` which is independent to Netfilter.
+<!-- TODO: write something about CT cleanup -->
+
+Note that neither binding record or CT record are dependent to Netfilter conntrack system, they are independently maintained by `einat` which is independent to Netfilter conntracks.
 
 ## Hairpinning
 
