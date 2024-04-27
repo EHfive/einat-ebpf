@@ -105,6 +105,7 @@ And `einat` utilizes libbpf's CO-RE(Compile Once – Run Everywhere) capabilitie
 
 -   How NAT traversal works, by David Anderson <https://tailscale.com/blog/how-nat-traversal-works>
 -   RFC 4787, Network Address Translation (NAT) Behavioral Requirements for Unicast UDP, <https://datatracker.ietf.org/doc/html/rfc4787>
+-   [Chinese] einat-ebpf，用 eBPF 从头写一个 Full Cone NAT, <https://eh5.me/zh-cn/blog/einat-introduction/>
 
 ## COPYING
 
