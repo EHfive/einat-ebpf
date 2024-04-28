@@ -458,10 +458,17 @@ fn tracing_init() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     libbpf_rs::set_print(Some((PrintLevel::Debug, |level, msg| {
-        let span = span!(tracing::Level::DEBUG, "libbpf");
+        let span = span!(tracing::Level::ERROR, "libbpf");
         let _enter = span.enter();
 
-        let msg = msg.trim_end_matches('\n');
+        let msg = msg.trim_start_matches("libbpf: ").trim_end_matches('\n');
+
+        if let Some(msg) = msg.strip_prefix("Kernel error message: ") {
+            // Avoid showing harmless "Exclusivity flag on, cannot modify" in default "WARN" level
+            debug!("libbpf netlink ACK error message: {}", msg);
+            return;
+        }
+
         match level {
             PrintLevel::Info => info!("{}", msg),
             PrintLevel::Warn => warn!("{}", msg),
