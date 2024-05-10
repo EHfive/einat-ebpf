@@ -109,4 +109,6 @@ naersk'.buildPackage {
       export NIX_BINTOOLS_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.suffixSalt}="";
     fi
   '';
+
+  doCheck = true;
 }
