@@ -110,5 +110,5 @@ naersk'.buildPackage {
     fi
   '';
 
-  doCheck = true;
+  doCheck = crossPkgs.system == pkgs.system;
 }
