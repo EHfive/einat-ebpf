@@ -464,7 +464,7 @@ fn tracing_init() -> Result<()> {
         let msg = msg.trim_start_matches("libbpf: ").trim_end_matches('\n');
 
         if let Some(msg) = msg.strip_prefix("Kernel error message: ") {
-            // Avoid showing harmless "Exclusivity flag on, cannot modify" in default "WARN" level
+            // Avoid showing harmless "Exclusivity flag on, cannot modify" in default "INFO" level
             debug!("libbpf netlink ACK error message: {}", msg);
             return;
         }
