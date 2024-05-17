@@ -89,3 +89,31 @@ Run Natter with router STUN server specified on device 1:
 ```shell
 python natter.py -b 20001 -m test -s 233.252.0.200
 ```
+
+## WireGuard VPN "server"
+
+> [!NOTE]
+> This section does not follow example network configuration above.
+
+For WireGuard peer in server role, commonly we setup private IP on WireGuard interface(i.e. `wg0`) and do iptables/nftables masquerading for traffic forwarding between WireGuard interface and default external interface from which can reach public Internet. Example nftables rules below.
+
+```nft
+table inet nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        iifname wg0 oifname eth0 masquerade
+    }
+}
+```
+
+However this only gives WireGuard "client" connecting this "server" an Address and Port-Dependent Mapping (with Endpoint-Independent Mapping characteristic[^netfilter-behavior]) and Address and Port-Dependent Filtering network environment that provided by Netfilter NAT system.
+
+[^netfilter-behavior]: https://eh5.me/zh-cn/blog/nat-behavior-of-netfilter/
+
+To have Endpoint-Independent Mapping and Endpoint-Independent Filtering NAT behavior for traffic forwarding between WireGuard "client" and external interface on WireGuard "server", you can use `einat` instead of iptables/nftables masquerading. Also make sure iptables/nftables masquerade rules like above are removed if you are migrating from iptables/nftables masquerade to `einat`.
+
+```
+$ sudo einat -i eth0 --ports 20000-29999 --hairpin-if wg0
+```
+
+Note unlike iptables/nftables, you cannot filter by inbound interface in `einat` so `einat` would do NAT for all traffic forwarding to specified external interface regardless of inbound interface. And if you are hosting TCP/UDP services on same server, you might want to tweak external ports that `einat` uses so inbound initiated traffic towards unoccupied external ports are accepted. For example, the listening port of WireGuard service should not in range of external ports that `einat` uses(e.g. the default 20000-29999), tweak the port setting of either `einat` or WireGuard so inbound initiated traffic toward WireGuard service are accepted without filtering by `einat`.
