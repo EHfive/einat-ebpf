@@ -46,6 +46,8 @@ nix build "github:EHfive/einat-ebpf#static-aarch64-unknown-linux-musl"
 
 For NixOS, you can use module [`github:EHfive/einat-ebpf#nixosModules.default`](./nix/module.nix).
 
+For OpenWrt, there are [openwrt-einat-ebpf](https://github.com/muink/openwrt-einat-ebpf) and [luci-app-einat](https://github.com/muink/luci-app-einat) by @muink.
+
 See also [cross-compilation guide](./docs/guide/cross.md) for cross-compilation on Debian/Debian-based distros.
 
 ## Usage

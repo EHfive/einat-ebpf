@@ -42,6 +42,9 @@ See https://github.com/iovisor/bcc/blob/master/docs/kernel_config.md for explana
 
 ## Setup einat
 
+> [!NOTE]
+> Alternatively, you can use [openwrt-einat-ebpf](https://github.com/muink/openwrt-einat-ebpf) and [luci-app-einat](https://github.com/muink/luci-app-einat) instead of setting up `einat` manually.
+
 Find out interface names for your router with `ip addr`, it would be `pppoe-wan` or `wan` for external interface and `br-lan` for internal interface in a common OpenWrt setup.
 
 Download pre-built binaries for x86_64 or aarch64 from [release page](https://github.com/EHfive/einat-ebpf/releases/latest) or [actions snapshot build](https://github.com/EHfive/einat-ebpf/actions/workflows/build.yml).
