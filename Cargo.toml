@@ -32,7 +32,7 @@ static = ["libbpf-sys/static"]
 anyhow = "1.0.83"
 async-stream = "0.3.5"
 bitflags = { version = "2.5.0", features = ["bytemuck"] }
-bytemuck = { version = "1.15.0", features = ["derive"] }
+bytemuck = { version = "1.16.0", features = ["derive"] }
 fundu = "2.0.0"
 futures-util = { version = "0.3.30", default-features = false, features = [
     "std",
@@ -41,15 +41,15 @@ ipnet = { version = "2.9.0", features = ["serde"] }
 lexopt = "0.3.0"
 libbpf-rs = "0.23.1"
 libbpf-sys = "1.4.1"
-libc = "0.2.154"
+libc = "0.2.153"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
 netlink-sys = "0.8.6"
 prefix-trie = "0.3.0"
 rtnetlink = "0.14.1"
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.202", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["macros", "rt", "signal", "sync"] }
-toml = { version = "0.8.12", default-features = false, features = ["parse"] }
+toml = { version = "0.8.13", default-features = false, features = ["parse"] }
 tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
     "std",
