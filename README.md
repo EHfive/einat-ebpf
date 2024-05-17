@@ -62,7 +62,8 @@ OPTIONS:
   -h, --help                   Print this message
   -c, --config <file>          Path to configuration file
   -i, --ifname <name>          External network interface name, e.g. eth0
-      --nat44                  Enable NAT44/NAPT44 for specified network interface
+      --nat44                  Enable NAT44/NAPT44 for specified network interface, enabled by
+                               default if neither --nat44 nor --nat66 are specified
       --nat66                  Enable NAT66/NAPT66 for specified network interface
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0

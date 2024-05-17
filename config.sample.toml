@@ -28,10 +28,14 @@ ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 [[interfaces]]
 # External or outbound interface on which NAT would be performed.
 if_name = "eth0"
+
+# Unlike NAT flags in CLI options, `nat44` and `nat66` are both disabled by default.
+# Set either `nat44` or `nat66` to enable NAT.
 # Enable NAPT44
-nat44 = true
-# Enable NAPT66
+nat44 = false
+# Enable NAPT66, this requires that einat was bulit with "ipv6" feature flag.
 nat66 = false
+
 # Set max BPF log level
 # 0: disable, 1: error, 2: warn, 3: info, 4: debug, 5: trace
 # View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
@@ -42,6 +46,7 @@ bpf_fib_lookup_external = false
 # Set this to `false` for early disabling inbound ICMP binding initiation,
 # similar to set `icmp_in_ranges = []`.
 allow_inbound_icmpx = true
+
 # NAT records lifetimes, see <https://datatracker.ietf.org/doc/html/rfc6146#section-4> .
 # See available time units in <https://github.com/fundu-rs/fundu/blob/fundu-v2.0.0/README.md#time-units> .
 timeout_fragment = "2s"
