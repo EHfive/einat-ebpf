@@ -6,7 +6,7 @@
 , clang
 , elfutils
 , zlib
-, enableIpv6 ? false
+, enableIpv6 ? true
 }:
 naersk.buildPackage {
   src = ../.;

@@ -51,9 +51,7 @@
         {
           packages = {
             default = defaultPackage;
-            ipv6 = crossPackage {
-              enableIpv6 = true;
-            };
+            ipv6 = defaultPackage;
 
             static-x86_64-unknown-linux-musl = crossPackage {
               crossPkgs = pkgs.pkgsCross.musl64;
