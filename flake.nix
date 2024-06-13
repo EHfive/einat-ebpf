@@ -7,7 +7,11 @@
       inputs.systems.follows = "systems";
     };
     fenix = {
-      url = "github:nix-community/fenix";
+      # nightly update in https://github.com/nix-community/fenix/commit/49b387d269e31271666c01d42a2763f87bbe62b1
+      # breaks native library linking to nix store,
+      # see https://github.com/rust-lang/rust/issues/125321
+      # use last working version
+      url = "github:nix-community/fenix/a2d19ef9305841f26c8ab908b1c09a84ca307e18";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     naersk = {
