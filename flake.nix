@@ -18,10 +18,13 @@
 
   outputs = { self, nixpkgs, flake-utils, fenix, naersk, ... }:
     let
+      defaultPackage' = pkgs: pkgs.callPackage ./nix/package.nix {
+        naersk = pkgs.callPackage naersk { };
+      };
       crossPackage' = import ./nix/cross-package.nix { inherit fenix naersk; };
 
       overlay = final: prev: {
-        einat = crossPackage' {
+        einat = defaultPackage' {
           pkgs = (import nixpkgs) { inherit (prev) system; };
         };
       };
@@ -41,13 +44,13 @@
           pkgs = (import nixpkgs) {
             inherit system;
           };
-          inherit (pkgs) lib;
 
+          defaultPackage = defaultPackage' pkgs;
           crossPackage = { ... }@args: crossPackage' ({ inherit pkgs; } // args);
         in
         {
           packages = {
-            default = crossPackage { };
+            default = defaultPackage;
             ipv6 = crossPackage {
               enableIpv6 = true;
             };
