@@ -1,6 +1,18 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
+
+#[cfg(all(feature = "gen-skel", not(feature = "gen-skel-source")))]
 include!(concat!(env!("OUT_DIR"), "/einat.skel.rs"));
+#[cfg(all(
+    feature = "ipv6",
+    any(not(feature = "gen-skel"), feature = "gen-skel-source")
+))]
+include!("einat-ipv6.skel.rs");
+#[cfg(all(
+    not(feature = "ipv6"),
+    any(not(feature = "gen-skel"), feature = "gen-skel-source")
+))]
+include!("einat-ipv4.skel.rs");
 
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;

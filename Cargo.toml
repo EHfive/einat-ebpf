@@ -23,10 +23,16 @@ ipv6 = []
 # Required on 32-bit platforms
 bindgen = ["libbpf-sys/bindgen"]
 # Link against static `libelf` and `zlib`.
+# Notice libbpf is vendrored and static in any case.
 static = ["libbpf-sys/static"]
-#
-# libbpf is vendrored and static in any case.
-#
+# Generate BPF skeleton instead of using pre-genrated skeleton, this is for BPF
+# program development.
+gen-skel = []
+# Pre-generate BPF skeleton into source, this for release so downstream does not
+# have to generate BPF skeleton in thier build process hence introducing
+# build platform dependencies on libelf and zlib on which might be tricky to
+# handle in cross-compilation.
+gen-skel-source = ["gen-skel"]
 
 [dependencies]
 anyhow = "1.0.86"
