@@ -11,8 +11,11 @@ fn main() {
     out.push("einat.skel.rs");
 
     let mut c_args = vec![
+        "-Wall".to_string(),
         "-Wno-compare-distinct-pointer-types".to_string(),
         "-mcpu=v3".to_string(),
+        #[cfg(debug_assertions)]
+        "-Werror".to_string(),
     ];
 
     if cfg!(feature = "ipv6") {

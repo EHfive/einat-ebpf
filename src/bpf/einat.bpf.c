@@ -598,7 +598,7 @@ static __always_inline int fragment_track(struct __sk_buff *skb,
 #define BPF_LOG_TOPIC "fragment_track"
 
     if (pkt->frag_type == FRAG_NONE ||
-        pkt->frag_type == FRAG_LAST && pkt->frag_off == 0) {
+        (pkt->frag_type == FRAG_LAST && pkt->frag_off == 0)) {
         // this is an atomic packet
         // XXX: pkt->l4_off >= 0 is always true here
         return pkt->l4_off >= 0 ? TC_ACT_OK : TC_ACT_UNSPEC;
@@ -690,7 +690,6 @@ static __always_inline bool dest_pass_nat(struct dest_config *config) {
 
 static __always_inline struct external_config *
 lookup_external_config(bool is_ipv4, const union u_inet_addr *external_addr) {
-    struct external_config *config;
     if (is_ipv4) {
         struct ipv4_lpm_key key = {.prefixlen = 32, .ip = external_addr->ip};
         return bpf_map_lookup_elem(&map_ipv4_external_config, &key);
@@ -1744,7 +1743,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 
 #ifdef FEAT_IPV6
     barrier_var(is_ipv4);
-    if (is_ipv4 && !INGRESS_IPV4 || !is_ipv4 && !INGRESS_IPV6) {
+    if ((is_ipv4 && !INGRESS_IPV4) || (!is_ipv4 && !INGRESS_IPV6)) {
         return TC_ACT_UNSPEC;
     }
 #else
@@ -1839,7 +1838,7 @@ int egress_snat(struct __sk_buff *skb) {
 
 #ifdef FEAT_IPV6
     barrier_var(is_ipv4);
-    if (is_ipv4 && !EGRESS_IPV4 || !is_ipv4 && !EGRESS_IPV6) {
+    if ((is_ipv4 && !EGRESS_IPV4) || (!is_ipv4 && !EGRESS_IPV6)) {
         return TC_ACT_UNSPEC;
     }
 #else
