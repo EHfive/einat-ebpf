@@ -331,6 +331,8 @@ find_port_range_idx(u16 port, u8 range_len,
                     const struct port_range range_list[MAX_PORT_RANGES]) {
 #pragma unroll
     for (int i = 0; i < MAX_PORT_RANGES; i++) {
+        // somehow unroll would fail without this barrier
+        barrier();
         if (i >= range_len) {
             break;
         }
