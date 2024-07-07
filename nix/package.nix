@@ -3,7 +3,7 @@
 , rustPlatform
 , pkg-config
 , rustfmt
-, clang
+, llvmPackages
 , elfutils
 , zlib
 , enableIpv6 ? true
@@ -14,7 +14,7 @@ naersk.buildPackage {
   nativeBuildInputs = [
     pkg-config
     rustfmt
-    clang
+    llvmPackages.clang-unwrapped
     rustPlatform.bindgenHook
     elfutils
     zlib

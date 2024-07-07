@@ -67,7 +67,7 @@ naersk'.buildPackage {
     # for cross linking libelf and zlib, and make libbpf
     crossPkgs.stdenv.cc
     # compile BPF C code
-    clang
+    llvmPackages.clang-unwrapped
   ];
   inherit buildInputs;
   strictDeps = true;
