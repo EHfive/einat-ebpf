@@ -25,7 +25,7 @@ Compliant except [REQ-14](#req-14), receiving out-of-order fragments.
     applicable to NATs that do not support IP address pooling.
 -   ❓ Not applicable.
 
-`einat` does support "IP address pooling" so this requirement is not applicable.
+`einat` does not support "IP address pooling" so this requirement is not applicable.
 
 However, with `bpf_fib_lookup_external` enabled `einat` would query routing table to determine initial NAT external address which is similar to "IP address pooling". And if there is some policy-based routing rule(i.e. `ip rule`) selects preferred external address that is destination dependent, the "Paired" behavior would be broken.
 
