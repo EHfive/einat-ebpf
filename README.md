@@ -1,6 +1,8 @@
-# eBPF-based Endpoint-Independent NAT
+# einat
 
-This eBPF application implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT(network address translation) on TC egress and ingress hooks.
+einat is an eBPF-based Endpoint-Independent NAT(Network Address Translation).
+
+The eBPF part of einat implements an "Endpoint-Independent Mapping" and "Endpoint-Independent Filtering" NAT on TC egress and ingress hooks.
 
 ### Features
 
@@ -87,6 +89,12 @@ sudo einat --config /path/to/config.toml
 See [config.sample.toml](./config.sample.toml) for more configuration options. This program requires `cap_sys_admin` for passing eBPF verification and `cap_net_admin` for attaching eBPF program to TC hooks on network interface.
 
 Also make sure nftables/iptables masquerading rule is not set and forwarding of inbound traffic from external interface to internal interfaces for port ranges `einat` uses is allowed.
+
+If you attach einat to tunnel interfaces(e.g. PPPoE, WireGuard) with MTU less than 1500 bytes,
+you might also want to setup [TCP MSS clamping] in case there is ICMP black hole which prevent PMTUD(Path MTU Discovery) from functioning on either internal or remote side,
+see <https://github.com/EHfive/einat-ebpf/issues/19>. Though this only works for TCP.
+
+[TCP MSS clamping]: https://wiki.nftables.org/wiki-nftables/index.php/Mangling_packet_headers#Mangling_TCP_options
 
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
 
