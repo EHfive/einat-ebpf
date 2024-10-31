@@ -1688,7 +1688,7 @@ static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
     bool is_ipv4;
     if (HAS_ETH_ENCAP) {
         struct ethhdr *eth = data;
-        if ((void *)(eth + 1) > data_end) {
+        if (VALIDATE_PULL(skb, &eth, 0, sizeof(*eth))) {
             return TC_ACT_SHOT;
         }
 
@@ -1703,9 +1703,10 @@ static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
         }
     } else {
         u8 *p_version = data;
-        if ((void *)(p_version + 1) > data_end) {
+        if (VALIDATE_PULL(skb, &p_version, 0, sizeof(*p_version))) {
             return TC_ACT_SHOT;
         }
+
         u8 version = (*p_version) >> 4;
         if (version == 4) {
             is_ipv4 = true;
