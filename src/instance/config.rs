@@ -5,6 +5,8 @@ use std::fmt::Display;
 use std::ops::RangeInclusive;
 
 use anyhow::{anyhow, Result};
+// avoid reinventing the wheel, this would not increase binary size much
+use aya::util::KernelVersion;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
 use ipnet::{IpNet, Ipv4Net};
@@ -80,11 +82,17 @@ impl LoadConfig {
             ..Default::default()
         };
 
+        let bpf_fib_lookup_external = config.bpf_fib_lookup_external.unwrap_or_else(|| {
+            if let Ok(v) = KernelVersion::current() {
+                v >= KernelVersion::new(6, 7, 0)
+            } else {
+                false
+            }
+        });
+        ro_data.ENABLE_FIB_LOOKUP_SRC = bpf_fib_lookup_external as _;
+
         if let Some(v) = config.bpf_log_level {
             ro_data.LOG_LEVEL = v;
-        }
-        if let Some(v) = config.bpf_fib_lookup_external {
-            ro_data.ENABLE_FIB_LOOKUP_SRC = v as _;
         }
         if let Some(v) = config.allow_inbound_icmpx {
             ro_data.ALLOW_INBOUND_ICMPX = v as _;

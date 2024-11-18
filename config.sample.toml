@@ -44,7 +44,8 @@ nat66 = false
 bpf_log_level = 0
 # Enable external address(preferd source) lookup, recommended to enable.
 # Only works on Linux kernel>=6.7, it's a no-op for kernel on lower version.
-bpf_fib_lookup_external = false
+# Enabled by default on Linux kernel>=6.9.
+bpf_fib_lookup_external = true
 # Set this to `false` for early disabling inbound ICMP binding initiation,
 # similar to set `icmp_in_ranges = []`.
 allow_inbound_icmpx = true

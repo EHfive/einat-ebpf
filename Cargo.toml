@@ -21,7 +21,9 @@ default = ["aya", "pkg-config"]
 # Enable IPv6 NAPT
 ipv6 = []
 # Enable Aya BPF loader, requires Rust>=1.80.0
-aya = ["dep:aya"]
+aya = [
+    # the dep:aya is also used for determine kernel version so it's already included
+]
 # Enable libbpf BPF loader
 libbpf = ["dep:libbpf-rs", "dep:libbpf-sys"]
 # Enable libbpf skeleton-wrapped BPF loader, requires unpublish self_cell for now
@@ -42,7 +44,7 @@ static = ["libbpf-sys?/static"]
 [dependencies]
 anyhow = "1.0.93"
 async-stream = "0.3.6"
-aya = { version = "0.13.1", optional = true }
+aya = "0.13.1"
 aya-obj = "0.2.1"
 bitflags = { version = "2.6.0", features = ["bytemuck"] }
 bytemuck = { version = "1.19.0", features = ["derive"] }
