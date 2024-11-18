@@ -54,6 +54,8 @@ impl Default for EinatConstConfig {
 
 /// Model trait for operations on our einat ebpf resources
 pub trait EinatEbpf: Sized {
+    const NAME: &str;
+
     type MapBinding: EbpfHashMapMut<MapBindingKey, MapBindingValue>;
 
     type MapCt: EbpfHashMapMut<MapCtKey, MapCtValue>;

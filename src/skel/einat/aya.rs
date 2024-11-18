@@ -127,6 +127,8 @@ impl EinatAya {
 }
 
 impl EinatEbpf for EinatAya {
+    const NAME: &str = "Aya";
+
     type MapBinding = MapBinding;
     type MapCt = MapCt;
     type Links = EinatAyaLinks;

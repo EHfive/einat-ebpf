@@ -79,7 +79,11 @@ impl<T: EinatEbpfSkel> EinatInstance<T> {
 
         let skel = T::load(config.0)?;
 
-        info!("einat eBPF instance loaded in {:?}", start.elapsed());
+        info!(
+            "einat eBPF instance loaded in {:?} with {} loader",
+            start.elapsed(),
+            T::NAME
+        );
 
         Ok(Self {
             skel,
