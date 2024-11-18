@@ -43,7 +43,7 @@ fn einat_obj_build() {
     cmd.args(c_args());
 
     if let Some(cflags) = option_env!("EINAT_BPF_CFLAGS") {
-        cmd.arg(cflags);
+        cmd.args(cflags.split_ascii_whitespace());
     }
 
     // Specify environment variable LIBBPF_NO_PKG_CONFIG=1 to disable pkg-config lookup.
