@@ -50,7 +50,7 @@ impl Default for EinatRoData {
     fn default() -> Self {
         const E9: u64 = 1_000_000_000;
         Self {
-            LOG_LEVEL: 4,
+            LOG_LEVEL: 0,
             HAS_ETH_ENCAP: 1,
             INGRESS_IPV4: 1,
             EGRESS_IPV4: 1,
