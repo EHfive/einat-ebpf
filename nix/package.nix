@@ -1,12 +1,14 @@
-{ naersk
-, lib
-, rustPlatform
-, pkg-config
-, rustfmt
-, llvmPackages
-, elfutils
-, zlib
-, enableIpv6 ? true
+{
+  naersk,
+  lib,
+  rustPlatform,
+  pkg-config,
+  rustfmt,
+  llvmPackages,
+  libbpf,
+  elfutils,
+  zlib,
+  enableIpv6 ? true,
 }:
 naersk.buildPackage {
   src = ../.;
@@ -15,17 +17,22 @@ naersk.buildPackage {
     pkg-config
     rustfmt
     llvmPackages.clang-unwrapped
+    llvmPackages.bintools-unwrapped
     rustPlatform.bindgenHook
     elfutils
     zlib
   ];
 
   buildInputs = [
+    libbpf
     elfutils
     zlib
   ];
 
-  buildFeatures = lib.optionals enableIpv6 [ "ipv6" ];
+  buildFeatures = [
+    "aya"
+    "libbpf"
+  ] ++ lib.optionals enableIpv6 [ "ipv6" ];
 
   meta = with lib; {
     description = "An eBPF-based Endpoint-Independent(Full Cone) NAT";

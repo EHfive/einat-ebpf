@@ -1,25 +1,19 @@
-{ fenix, naersk }:
-{ pkgs
-, crossPkgs ? pkgs
-, targetTriple ? crossPkgs.hostPlatform.config
-, enableStatic ? false
-, enableIpv6 ? false
+{ naersk }:
+{
+  pkgs,
+  crossPkgs ? pkgs,
+  targetTriple ? crossPkgs.hostPlatform.config,
+  enableStatic ? false,
+  enableIpv6 ? false,
 }:
 let
   inherit (pkgs) lib system;
   targetUnderscore = lib.replaceStrings [ "-" ] [ "_" ] targetTriple;
   targetUnderscoreUpper = lib.toUpper targetUnderscore;
 
-  toolchain = with fenix.packages.${system};
-    combine [
-      minimal.rustc
-      minimal.cargo
-      # Rust target platform with support below tier 2 has no official builds
-      # and requires build-std. However, fenix does not support build-std,
-      # see https://github.com/nix-community/naersk/issues/146
-      #complete.rust-src
-      targets.${targetTriple}.latest.rust-std
-    ];
+  toolchain = pkgs.rust-bin.stable.latest.minimal.override {
+    targets = [ targetTriple ];
+  };
 
   naersk' = naersk.lib.${system}.override {
     cargo = toolchain;
@@ -28,22 +22,31 @@ let
 
   crossCC = "${crossPkgs.stdenv.cc}/bin/${crossPkgs.stdenv.cc.targetPrefix}cc";
 
-  buildInputs = with crossPkgs; [
-    ## runtime dependencies of libbpf-sys on target platform
-    stdenv.cc.libc
-    # elfutils already has static library built
-    elfutils
-  ]
-  ++ lib.optionals (!enableStatic) (with crossPkgs; [
-    zlib
-  ])
-  ++ lib.optionals enableStatic (
-    assert crossPkgs.hostPlatform.isMusl; with crossPkgs.pkgsStatic; [
-      zlib
-      #required by libelf
-      zstd
+  buildInputs =
+    with crossPkgs;
+    [
+      ## runtime dependencies of libbpf-sys on target platform
+      stdenv.cc.libc
+      # elfutils already has static library built
+      elfutils
     ]
-  );
+    ++ lib.optionals (!enableStatic) (
+      with crossPkgs;
+      [
+        zlib
+      ]
+    )
+    ++ lib.optionals enableStatic (
+      assert crossPkgs.hostPlatform.isMusl;
+      with crossPkgs.pkgsStatic;
+      [
+        zlib
+        #required by libelf
+        zstd
+      ]
+    ) ++ [
+        pkgs.libbpf
+    ];
 
   buildInputsSearchFlags = map (dep: "-L${lib.getLib dep}/lib") buildInputs;
 in
@@ -54,7 +57,7 @@ naersk'.buildPackage {
     # build dependencies of cargo build depenceies libbpf-cargo -> libbpf-sys
     stdenv.cc
   ];
-  nativeBuildInputs = with pkgs;[
+  nativeBuildInputs = with pkgs; [
     pkg-config
     # required by `libbpf_cargo::SkeletonBuilder`
     rustfmt
@@ -68,38 +71,47 @@ naersk'.buildPackage {
     crossPkgs.stdenv.cc
     # compile BPF C code
     llvmPackages.clang-unwrapped
+    llvmPackages.bintools-unwrapped
   ];
   inherit buildInputs;
   strictDeps = true;
 
-  cargoBuildOptions = orig: orig ++ [
-    #"-Z build-std"
-  ] ++ lib.optionals enableStatic [
-    "--features static"
-  ] ++ lib.optionals enableIpv6 [
-    "--features ipv6"
-  ]
-  ;
+  cargoBuildOptions =
+    orig:
+    orig
+    ++ [
+      #"-Z build-std"
+      "--features aya,libbpf"
+    ]
+    ++ lib.optionals enableStatic [
+      "--features static"
+    ]
+    ++ lib.optionals enableIpv6 [
+      "--features ipv6"
+    ];
 
   # bindgen libbpf for build platform and target platform
   LIBCLANG_PATH = "${pkgs.clang.cc.lib}/lib";
 
   CARGO_BUILD_TARGET = targetTriple;
 
-  NIX_CFLAGS_COMPILE = lib.optionals (enableStatic && crossPkgs.hostPlatform.isAarch) [ "-mno-outline-atomics" ];
+  NIX_CFLAGS_COMPILE = lib.optionals (enableStatic && crossPkgs.hostPlatform.isAarch) [
+    "-mno-outline-atomics"
+  ];
 
   "CC_${targetUnderscore}" = crossCC;
   "CARGO_TARGET_${targetUnderscoreUpper}_LINKER" = crossCC;
 
-  "CARGO_TARGET_${targetUnderscoreUpper}_RUSTFLAGS" = lib.concatStringsSep " "
-    ([
+  "CARGO_TARGET_${targetUnderscoreUpper}_RUSTFLAGS" = lib.concatStringsSep " " (
+    [
       "-C target-feature=${if enableStatic then "+" else "-"}crt-static"
     ]
     ++ buildInputsSearchFlags
     ++ lib.optionals enableStatic [
       "-lstatic=pthread"
       "-lstatic=zstd"
-    ]);
+    ]
+  );
 
   preBuild = ''
     export BINDGEN_EXTRA_CLANG_ARGS_${targetUnderscore}="''${NIX_CFLAGS_COMPILE}";
