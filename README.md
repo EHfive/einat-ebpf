@@ -24,17 +24,15 @@ For implementation details, see documentations under [reference](./docs/referenc
 -   `clang` for compiling BPF C code
 -   `libbpf` headers
 -   (optional) `pkg-config` to locate `libbpf` headers
-
-`"aya"` loader (default)
-
 -   `llvm-strip` for stripping compiled BPF object
 
-`"libbpf"` loader
+Additional dependencies for `"libbpf"` loader:
 
 -   `rustfmt` for formatting generated code
 -   `clang` libs for bindgen
--   `libelf` from elfutils
--   `zlib`
+-   `libelf` from elfutils and  `zlib` on target platform
+
+Currently we support `"aya"`, `"libbpf"` and `"libbpf-skel"` eBPF loaders, only the `"aya"` is enabled by default as it requires no native dependencies on target platform except libc.
 
 The `"libbpf-skel"` loader is served as reference purpose and you should just use `aya` or `libbpf` instead.
 
@@ -45,7 +43,6 @@ See also [OpenWrt guide](./docs/guide/openwrt.md) for pitfalls running this on O
 ## Installation
 
 ```shell
-cargo install --git https://github.com/EHfive/einat-ebpf.git
 cargo install --git https://github.com/EHfive/einat-ebpf.git
 ```
 
