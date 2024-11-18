@@ -78,6 +78,10 @@ ct_max_records = 393216
 # other enabled loading backend if not available.
 bpf_loader = "aya"
 
+# Use TCX interface if available, only supported by aya loader.
+# Enabled by default on Linux kernel>=6.6
+prefer_tcx = true
+
 # Disable source nat for specified destination networks.
 no_snat_dests = [
     # "192.168.0.0/16"

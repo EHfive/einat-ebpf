@@ -115,6 +115,7 @@ impl LoadConfig {
 
         let mut const_config = einat::EinatConstConfig {
             ro_data,
+            prefer_tcx: config.prefer_tcx,
             ..Default::default()
         };
 

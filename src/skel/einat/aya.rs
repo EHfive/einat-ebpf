@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+use std::io;
 use std::net::Ipv4Addr;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
@@ -8,7 +9,8 @@ use std::net::Ipv6Addr;
 use anyhow::Result;
 use aya::maps::{Array, HashMap, LpmTrie, MapData};
 use aya::programs::tc::{
-    qdisc_add_clsact, SchedClassifier, SchedClassifierLinkId, TcAttachOptions, TcAttachType,
+    qdisc_add_clsact, qdisc_detach_program, NlOptions, SchedClassifier, SchedClassifierLinkId,
+    TcAttachOptions, TcAttachType,
 };
 use aya::util::KernelVersion;
 use aya::{Ebpf, EbpfLoader};
@@ -198,10 +200,25 @@ impl EinatEbpf for EinatAya {
                 TcAttachOptions::TcxOrder(Default::default()),
             )
         } else {
-            qdisc_add_clsact(if_name)?;
+            if let Err(e) = qdisc_add_clsact(if_name) {
+                if e.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(e.into());
+                }
+            };
+
+            let _ =
+                qdisc_detach_program(if_name, TcAttachType::Ingress, types::PROG_INGRESS_REV_SNAT);
+            let _ = qdisc_detach_program(if_name, TcAttachType::Egress, types::PROG_EGRESS_SNAT);
+
             (
-                TcAttachOptions::Netlink(Default::default()),
-                TcAttachOptions::Netlink(Default::default()),
+                TcAttachOptions::Netlink(NlOptions {
+                    handle: 1,
+                    priority: 1,
+                }),
+                TcAttachOptions::Netlink(NlOptions {
+                    handle: 1,
+                    priority: 1,
+                }),
             )
         };
 

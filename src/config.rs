@@ -131,14 +131,16 @@ pub enum BpfLoader {
     LibbpfSkel,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ConfigNetIf {
     pub if_name: String,
     #[serde(default)]
     pub nat44: bool,
+
+    #[cfg_attr(not(feature = "ipv6"), allow(dead_code))]
     #[serde(default)]
     pub nat66: bool,
+
     #[serde(default)]
     pub bpf_log_level: Option<u8>,
     #[serde(default)]
@@ -169,10 +171,15 @@ pub struct ConfigNetIf {
     pub externals: Vec<ConfigExternal>,
     #[serde(default)]
     pub ipv4_hairpin_route: ConfigHairpinRoute,
+
+    #[cfg_attr(not(feature = "ipv6"), allow(dead_code))]
     #[serde(default)]
     pub ipv6_hairpin_route: ConfigHairpinRoute,
+
     #[serde(default)]
     pub bpf_loader: Option<BpfLoader>,
+    #[serde(default = "default_true")]
+    pub prefer_tcx: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
