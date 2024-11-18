@@ -40,21 +40,35 @@ fn einat_obj_build() {
     // compile BPF C code
     let mut cmd = Command::new("clang");
 
+    cmd.args(c_args());
+
+    if let Some(cflags) = option_env!("EINAT_BPF_CFLAGS") {
+        cmd.arg(cflags);
+    }
+
+    // Specify environment variable LIBBPF_NO_PKG_CONFIG=1 to disable pkg-config lookup.
+    // Or just disable the "pkg-config" feature.
+    #[cfg(feature = "pkg-config")]
+    match pkg_config::probe_library("libbpf") {
+        Ok(libbpf) => {
+            let includes = libbpf
+                .include_paths
+                .into_iter()
+                .map(|i| format!("-I{}", i.to_string_lossy()));
+            cmd.args(includes);
+        }
+        Err(e) => {
+            eprintln!("Can not locate libbpf with pkg-config: {}", e)
+        }
+    }
+
     let target = if env::var("CARGO_CFG_TARGET_ENDIAN").unwrap() == "little" {
         "bpfel"
     } else {
         "bpfeb"
     };
 
-    let libbpf = pkg_config::probe_library("libbpf").unwrap();
-
-    let includes = libbpf
-        .include_paths
-        .into_iter()
-        .map(|i| format!("-I{}", i.to_string_lossy()));
-
-    cmd.args(c_args())
-        .arg("-target")
+    cmd.arg("-target")
         .arg(target)
         .arg("-g")
         .arg("-O2")
@@ -62,7 +76,6 @@ fn einat_obj_build() {
         .arg(SRC)
         .arg("-o")
         .arg(bpf_obj)
-        .args(includes)
         .status()
         .expect("compile BPF object failed");
 

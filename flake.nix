@@ -34,9 +34,7 @@
       crossPackage' = import ./nix/cross-package.nix { inherit naersk; };
 
       overlay = final: prev: {
-        einat = defaultPackage' {
-          pkgs = (import nixpkgs) { inherit (prev) system; };
-        };
+        einat = defaultPackage' prev;
       };
 
       module = {
@@ -60,6 +58,11 @@
         crossPackage = { ... }@args: crossPackage' ({ inherit pkgs; } // args);
       in
       {
+        legacyPackages = (import nixpkgs) {
+          inherit system;
+          overlays = [ overlay ];
+        };
+
         packages = {
           default = defaultPackage;
           ipv6 = defaultPackage;

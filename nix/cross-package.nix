@@ -44,34 +44,23 @@ let
         #required by libelf
         zstd
       ]
-    ) ++ [
-        pkgs.libbpf
-    ];
+    );
 
   buildInputsSearchFlags = map (dep: "-L${lib.getLib dep}/lib") buildInputs;
 in
 naersk'.buildPackage {
   src = ../.;
   gitSubmodules = true;
-  depsBuildBuild = with pkgs; [
-    # build dependencies of cargo build depenceies libbpf-cargo -> libbpf-sys
-    stdenv.cc
-  ];
   nativeBuildInputs = with pkgs; [
     pkg-config
-    # required by `libbpf_cargo::SkeletonBuilder`
-    rustfmt
-    ## build dependencies of cargo build depenceies libbpf-cargo -> libbpf-sys
-    stdenv.cc.libc
-    zlib
-    elfutils
+
+    # compile BPF C code
+    llvmPackages.clang-unwrapped
+    llvmPackages.bintools-unwrapped
 
     ## build dependencies of libbpf-sys on target platform
     # for cross linking libelf and zlib, and make libbpf
     crossPkgs.stdenv.cc
-    # compile BPF C code
-    llvmPackages.clang-unwrapped
-    llvmPackages.bintools-unwrapped
   ];
   inherit buildInputs;
   strictDeps = true;
@@ -99,6 +88,9 @@ naersk'.buildPackage {
     "-mno-outline-atomics"
   ];
 
+  LIBBPF_NO_PKG_CONFIG = 1;
+  EINAT_BPF_CFLAGS = "-I${pkgs.libbpf}/include";
+
   "CC_${targetUnderscore}" = crossCC;
   "CARGO_TARGET_${targetUnderscoreUpper}_LINKER" = crossCC;
 
@@ -115,6 +107,7 @@ naersk'.buildPackage {
 
   preBuild = ''
     export BINDGEN_EXTRA_CLANG_ARGS_${targetUnderscore}="''${NIX_CFLAGS_COMPILE}";
+
     # Avoid adding host dependencies to CFLAGS and LDFLAGS for build platform
     if [[ ${pkgs.stdenv.cc.suffixSalt} != ${crossPkgs.stdenv.cc.suffixSalt} ]]; then
       export NIX_CC_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.suffixSalt}="";

@@ -20,19 +20,23 @@ For implementation details, see documentations under [reference](./docs/referenc
 ## Requirement
 
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
--   `clang` compiling BPF C code
--   `cargo` and `rustfmt` for building
-
-**aya** (default)
-
+-   Rust toolchain (`cargo` etc.)
+-   `clang` for compiling BPF C code
 -   `libbpf` headers
--   `llvm-strip`
+-   (optional) `pkg-config` to locate `libbpf` headers
 
-**libbpf**
+`"aya"` loader (default)
 
+-   `llvm-strip` for stripping compiled BPF object
+
+`"libbpf"` loader
+
+-   `rustfmt` for formatting generated code
 -   `clang` libs for bindgen
 -   `libelf` from elfutils
 -   `zlib`
+
+The `"libbpf-skel"` loader is served as reference purpose and you should just use `aya` or `libbpf` instead.
 
 It's also required the eBPF JIT implementation for target architecture in kernel has implemented support for BPF-to-BPF calls, which is not the case for MIPS and other architectures have less interests. This application is only tested to work on x86-64 or aarch64.
 
@@ -41,6 +45,7 @@ See also [OpenWrt guide](./docs/guide/openwrt.md) for pitfalls running this on O
 ## Installation
 
 ```shell
+cargo install --git https://github.com/EHfive/einat-ebpf.git
 cargo install --git https://github.com/EHfive/einat-ebpf.git
 ```
 
@@ -59,7 +64,20 @@ For NixOS, you can use module [`github:EHfive/einat-ebpf#nixosModules.default`](
 
 For OpenWrt, there are [openwrt-einat-ebpf](https://github.com/muink/openwrt-einat-ebpf) and [luci-app-einat](https://github.com/muink/luci-app-einat) by @muink.
 
-See also [cross-compilation guide](./docs/guide/cross.md) for cross-compilation on Debian/Debian-based distros.
+See also [cross-compilation guide](./docs/guide/cross-aya.md) for cross-compilation on Debian/Debian-based distros.
+
+### Build Environment Variables
+
+| Name                   | Example Value              | Note                                            |
+| ---------------------- | -------------------------- | ----------------------------------------------- |
+| `EINAT_BPF_CFLAGS`     | `-I/usr/include/<triplet>` | Specify extra CFLAGS for BPF object compilation |
+| `LIBBPF_NO_PKG_CONFIG` | `1`                        | Disable [pkg_config lookup] of libbpf.          |
+
+[pkg_config lookup]: (https://docs.rs/pkg-config/0.3.31/pkg_config/index.html#environment-variables)
+
+You can combine `LIBBPF_NO_PKG_CONFIG` and `EINAT_BPF_CFLAGS` to specify include flag of libbpf headers manually.
+
+See also [build.rs](./build.rs) for reference.
 
 ## Usage
 

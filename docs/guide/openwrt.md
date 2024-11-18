@@ -34,7 +34,6 @@ Additional kernel configs required, you might need to add these to kernel config
 ```
 CONFIG_BPF_SYSCALL=y
 CONFIG_BPF_JIT=y
-CONFIG_NET_CLS_BPF=y
 CONFIG_NET_ACT_BPF=y
 ```
 

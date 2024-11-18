@@ -17,13 +17,13 @@ opt-level = "z"
 strip = true
 
 [features]
-default = ["aya"]
+default = ["aya", "pkg-config"]
 # Enable IPv6 NAPT
 ipv6 = []
 # Enable Aya BPF loader, requires Rust>=1.80.0
-aya = ["dep:aya", "dep:pkg-config"]
+aya = ["dep:aya"]
 # Enable libbpf BPF loader
-libbpf = ["dep:libbpf-rs", "dep:libbpf-sys", "dep:pkg-config"]
+libbpf = ["dep:libbpf-rs", "dep:libbpf-sys"]
 # Enable libbpf skeleton-wrapped BPF loader, requires unpublish self_cell for now
 libbpf-skel = [
     "dep:libbpf-rs",

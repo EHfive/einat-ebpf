@@ -3,7 +3,6 @@
   lib,
   rustPlatform,
   pkg-config,
-  rustfmt,
   llvmPackages,
   libbpf,
   elfutils,
@@ -15,12 +14,9 @@ naersk.buildPackage {
 
   nativeBuildInputs = [
     pkg-config
-    rustfmt
     llvmPackages.clang-unwrapped
     llvmPackages.bintools-unwrapped
     rustPlatform.bindgenHook
-    elfutils
-    zlib
   ];
 
   buildInputs = [
