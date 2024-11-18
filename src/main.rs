@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 mod config;
 mod instance;
+mod macros;
 mod route;
 mod skel;
 mod utils;
@@ -14,12 +15,14 @@ use futures_util::StreamExt;
 use ipnet::Ipv4Net;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
+#[cfg(any(feature = "libbpf", feature = "libbpf-skel"))]
+use libbpf_rs::PrintLevel;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, span, warn};
+use tracing::{debug, error, info, warn};
 
-use config::{Config, ConfigDefaults, ConfigNetIf, IpProtocol, ProtoRange};
-use instance::Instance;
+use config::{BpfLoader, Config, ConfigDefaults, ConfigNetIf, IpProtocol, ProtoRange};
+use instance::{EinatInstance, EinatInstanceEnum, EinatInstanceT, LoadConfig, RuntimeConfigEval};
 use route::{HairpinRouting, IfAddresses, MonitorEvent, PacketEncap, RouteHelper};
 
 const HELP: &str = "\
@@ -113,7 +116,8 @@ struct IfContext {
     if_name: String,
     defaults: ConfigDefaults,
     config: ConfigNetIf,
-    inst: Option<(Instance, PacketEncap)>,
+    config_evaluator: RuntimeConfigEval,
+    inst: Option<(EinatInstanceEnum, PacketEncap)>,
     active: Option<IfContextActive>,
     rt_helper: RouteHelper,
 }
@@ -135,15 +139,18 @@ impl DaemonContext {
 }
 
 impl IfContext {
-    fn new(defaults: ConfigDefaults, config: ConfigNetIf, rt_helper: RouteHelper) -> Self {
-        Self {
+    fn new(defaults: ConfigDefaults, config: ConfigNetIf, rt_helper: RouteHelper) -> Result<Self> {
+        let config_evaluator = RuntimeConfigEval::try_from(&config, &defaults)?;
+
+        Ok(Self {
             if_name: config.if_name.clone(),
             defaults,
             config,
+            config_evaluator,
             inst: None,
             active: None,
             rt_helper,
-        }
+        })
     }
 
     fn match_if_index(&self, other: u32) -> bool {
@@ -186,7 +193,7 @@ impl IfContext {
         let is_new = self.ensure_instance(link_info.encap(), &addresses).await?;
 
         let (inst, _) = self.inst.as_mut().expect("instance ensured");
-        inst.attach(if_index)?;
+        inst.attach(&self.if_name, if_index)?;
 
         self.active = Some(IfContextActive {
             addresses,
@@ -288,9 +295,44 @@ impl IfContext {
             }
         }
 
-        let inst_config =
-            instance::InstanceConfig::try_from(if_encap, &self.config, &self.defaults, addresses)?;
-        let inst = tokio::task::spawn_blocking(|| inst_config.load()).await??;
+        let has_eth_encap = match if_encap {
+            PacketEncap::Ethernet => true,
+            PacketEncap::BareIp => false,
+            PacketEncap::Unsupported => {
+                return Err(anyhow::anyhow!(
+                    "Interface has unsupported packet encapsulation"
+                ))
+            }
+            PacketEncap::Unknown => {
+                warn!("unknown interface packet encapsulation type, fallback to no encap");
+                false
+            }
+        };
+
+        let load_config = LoadConfig::from(&self.config, has_eth_encap);
+        let rt_config = self.config_evaluator.eval(addresses);
+        let loader = self.config.bpf_loader;
+
+        let inst = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut inst = match loader {
+                #[cfg(feature = "aya")]
+                Some(BpfLoader::Aya) => EinatInstanceEnum::Aya(EinatInstance::load(load_config)?),
+                #[cfg(feature = "libbpf")]
+                Some(BpfLoader::Libbpf) => {
+                    EinatInstanceEnum::Libbpf(EinatInstance::load(load_config)?)
+                }
+                #[cfg(feature = "libbpf-skel")]
+                Some(BpfLoader::LibbpfSkel) => {
+                    EinatInstanceEnum::LibbpfSkel(EinatInstance::load(load_config)?)
+                }
+                _ => EinatInstanceEnum::default_load(load_config)?,
+            };
+
+            inst.apply_config(rt_config)?;
+            Ok(inst)
+        })
+        .await??;
+
         self.inst = Some((inst, if_encap));
         Ok(true)
     }
@@ -303,14 +345,30 @@ impl IfContext {
             return Ok(());
         };
         if let Some(hairpin_routing) = &mut ctx.v4_hairpin_routing {
-            if let Err(e) = hairpin_routing.reconfigure(inst.v4_hairpin_dests()).await {
+            if let Err(e) = hairpin_routing
+                .reconfigure(
+                    inst.config()
+                        .expect("config not applied")
+                        .v4
+                        .hairpin_dests(),
+                )
+                .await
+            {
                 error!("failed to reconfigure IPv4 hairpin routing: {}", e);
             }
         }
 
         #[cfg(feature = "ipv6")]
         if let Some(hairpin_routing) = &mut ctx.v6_hairpin_routing {
-            if let Err(e) = hairpin_routing.reconfigure(inst.v6_hairpin_dests()).await {
+            if let Err(e) = hairpin_routing
+                .reconfigure(
+                    inst.config()
+                        .expect("config not applied")
+                        .v6
+                        .hairpin_dests(),
+                )
+                .await
+            {
                 error!("failed to reconfigure IPv6 hairpin routing: {}", e);
             }
         }
@@ -327,22 +385,11 @@ impl IfContext {
 
         let new_addresses = self.rt_helper.query_all_addresses(ctx.if_index).await?;
 
-        if new_addresses.ipv4 != ctx.addresses.ipv4 {
-            debug!(
-                "IPv4 addresses {:?} -> {:?}",
-                ctx.addresses.ipv4, new_addresses.ipv4
-            );
-            inst.reconfigure_v4_addresses(&new_addresses.ipv4)?;
-            ctx.addresses.ipv4 = new_addresses.ipv4;
-        }
-        #[cfg(feature = "ipv6")]
-        if new_addresses.ipv6 != ctx.addresses.ipv6 {
-            debug!(
-                "IPv6 addresses {:?} -> {:?}",
-                ctx.addresses.ipv6, new_addresses.ipv6
-            );
-            inst.reconfigure_v6_addresses(&new_addresses.ipv6)?;
-            ctx.addresses.ipv6 = new_addresses.ipv6;
+        if new_addresses != ctx.addresses {
+            debug!("addresses {:?} -> {:?}", ctx.addresses, new_addresses);
+            let rt_config = self.config_evaluator.eval(&new_addresses);
+            inst.apply_config(rt_config)?;
+            ctx.addresses = new_addresses;
         }
 
         self.reconfigure_hairpin().await?;
@@ -376,7 +423,7 @@ async fn daemon(config: Config, context: &mut DaemonContext) -> Result<JoinHandl
     let (monitor_task, rt_helper, events) = route::spawn_monitor()?;
 
     for if_config in config.interfaces {
-        let ctx = IfContext::new(config.defaults.clone(), if_config, rt_helper.clone());
+        let ctx = IfContext::new(config.defaults.clone(), if_config, rt_helper.clone())?;
         context.insert_context(ctx);
     }
 
@@ -454,12 +501,11 @@ async fn daemon_guard(config: Config) -> Result<()> {
 }
 
 fn tracing_init() -> Result<()> {
-    use libbpf_rs::PrintLevel;
-
     tracing_subscriber::fmt::init();
 
+    #[cfg(any(feature = "libbpf", feature = "libbpf-skel"))]
     libbpf_rs::set_print(Some((PrintLevel::Debug, |level, msg| {
-        let span = span!(tracing::Level::ERROR, "libbpf");
+        let span = tracing::span!(tracing::Level::ERROR, "libbpf");
         let _enter = span.enter();
 
         let msg = msg.trim_start_matches("libbpf: ").trim_end_matches('\n');

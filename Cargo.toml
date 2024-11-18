@@ -5,7 +5,7 @@ edition = "2021"
 license = "GPL-2.0"
 authors = ["Huang-Huang Bao <i@eh5.me>"]
 repository = "https://github.com/EHfive/einat-ebpf"
-rust-version = "1.74"
+rust-version = "1.75"
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,39 +17,55 @@ opt-level = "z"
 strip = true
 
 [features]
-default = []
+default = ["aya"]
 # Enable IPv6 NAPT
 ipv6 = []
-# Required on 32-bit platforms
-bindgen = ["libbpf-sys/bindgen"]
-# Link against static `libelf` and `zlib`.
-static = ["libbpf-sys/static"]
+# Enable Aya BPF loader, requires Rust>=1.80.0
+aya = ["dep:aya", "dep:pkg-config"]
+# Enable libbpf BPF loader
+libbpf = ["dep:libbpf-rs", "dep:libbpf-sys", "dep:pkg-config"]
+# Enable libbpf skeleton-wrapped BPF loader, requires unpublish self_cell for now
+libbpf-skel = [
+    "dep:libbpf-rs",
+    "dep:libbpf-sys",
+    "dep:libbpf-cargo",
+    "dep:self_cell",
+]
+# Bindgen for libbpf headers, required on 32-bit platforms
+bindgen = ["libbpf-sys?/bindgen"]
+# Link against static `libelf` and `zlib` for libbpf loader.
+static = ["libbpf-sys?/static"]
 #
 # libbpf is vendrored and static in any case.
 #
 
 [dependencies]
-anyhow = "1.0.86"
-async-stream = "0.3.5"
+anyhow = "1.0.93"
+async-stream = "0.3.6"
+aya = { version = "0.13.1", optional = true }
+aya-obj = "0.2.1"
 bitflags = { version = "2.6.0", features = ["bytemuck"] }
-bytemuck = { version = "1.16.1", features = ["derive"] }
-fundu = "2.0.0"
-futures-util = { version = "0.3.30", default-features = false, features = [
+bytemuck = { version = "1.19.0", features = ["derive"] }
+cfg-if = "1.0.0"
+enum_dispatch = "0.3.13"
+fundu = "2.0.1"
+futures-util = { version = "0.3.31", default-features = false, features = [
     "std",
 ] }
-ipnet = { version = "2.9.0", features = ["serde"] }
+ipnet = { version = "2.10.1", features = ["serde"] }
 lexopt = "0.3.0"
-libbpf-rs = "0.23.3"
-libbpf-sys = "1.4.2"
-libc = "0.2.155"
+libbpf-rs = { version = "0.24.8", optional = true }
+libbpf-sys = { version = "1.5.0", optional = true }
+libc = "0.2.164"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
 netlink-sys = "0.8.6"
-prefix-trie = "0.4.2"
+prefix-trie = "0.5.1"
 rtnetlink = "0.14.1"
-serde = { version = "1.0.204", features = ["derive"] }
-tokio = { version = "1.38.0", features = ["macros", "rt", "signal", "sync"] }
-toml = { version = "0.8.14", default-features = false, features = ["parse"] }
+self_cell = { version = "1.0.4", git = "https://github.com/Voultapher/self_cell.git", optional = true }
+serde = { version = "1.0.215", features = ["derive"] }
+tokio = { version = "1.41.1", features = ["macros", "rt", "signal", "sync"] }
+toml = { version = "0.8.19", default-features = false, features = ["parse"] }
 tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
     "std",
@@ -58,7 +74,8 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
 ] }
 
 [target.'cfg(not(target_arch="x86_64"))'.dependencies]
-libbpf-sys = { version = "1.4.2", features = ["bindgen"] }
+libbpf-sys = { version = "1.5.0", features = ["bindgen"], optional = true }
 
 [build-dependencies]
-libbpf-cargo = "0.23.3"
+libbpf-cargo = { version = "0.24.8", optional = true }
+pkg-config = { version = "0.3.31", optional = true }

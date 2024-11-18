@@ -20,10 +20,19 @@ For implementation details, see documentations under [reference](./docs/referenc
 ## Requirement
 
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
+-   `clang` compiling BPF C code
+-   `cargo` and `rustfmt` for building
+
+**aya** (default)
+
+-   `libbpf` headers
+-   `llvm-strip`
+
+**libbpf**
+
+-   `clang` libs for bindgen
 -   `libelf` from elfutils
 -   `zlib`
--   `clang` for bindgen and compiling BPF C code
--   `cargo` and `rustfmt` for building
 
 It's also required the eBPF JIT implementation for target architecture in kernel has implemented support for BPF-to-BPF calls, which is not the case for MIPS and other architectures have less interests. This application is only tested to work on x86-64 or aarch64.
 

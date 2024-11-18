@@ -124,6 +124,13 @@ pub struct ConfigHairpinRoute {
     pub ip_protocols: Vec<IpProtocol>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BpfLoader {
+    Aya,
+    Libbpf,
+    LibbpfSkel,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ConfigNetIf {
@@ -148,6 +155,12 @@ pub struct ConfigNetIf {
     pub timeout_tcp_trans: Option<Timeout>,
     #[serde(default)]
     pub timeout_tcp_est: Option<Timeout>,
+    #[serde(default)]
+    pub frag_track_max_records: Option<u32>,
+    #[serde(default)]
+    pub binding_max_records: Option<u32>,
+    #[serde(default)]
+    pub ct_max_records: Option<u32>,
     #[serde(default = "default_true")]
     pub default_externals: bool,
     #[serde(default)]
@@ -158,6 +171,8 @@ pub struct ConfigNetIf {
     pub ipv4_hairpin_route: ConfigHairpinRoute,
     #[serde(default)]
     pub ipv6_hairpin_route: ConfigHairpinRoute,
+    #[serde(default)]
+    pub bpf_loader: Option<BpfLoader>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -170,6 +185,20 @@ pub struct Config {
     pub defaults: ConfigDefaults,
     #[serde(default)]
     pub interfaces: Vec<ConfigNetIf>,
+}
+
+impl ConfigNetIf {
+    pub const fn nat44(&self) -> bool {
+        self.nat44
+    }
+
+    pub const fn nat66(&self) -> bool {
+        cfg!(feature = "ipv6") && self.nat66
+    }
+
+    pub const fn nat64(&self) -> bool {
+        false
+    }
 }
 
 impl From<Timeout> for u64 {
@@ -243,6 +272,41 @@ impl<'de> Deserialize<'de> for IpProtocol {
         }
 
         deserializer.deserialize_str(IpProtocolVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for BpfLoader {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct BpfLoaderVisitor;
+        impl<'de> Visitor<'de> for BpfLoaderVisitor {
+            type Value = BpfLoader;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("BPF loader: aya, libbpf or libbpf-skel")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.eq_ignore_ascii_case("aya") {
+                    Ok(BpfLoader::Aya)
+                } else if v.eq_ignore_ascii_case("libbpf") {
+                    Ok(BpfLoader::Libbpf)
+                } else if v.eq_ignore_ascii_case("libbpf-skel") {
+                    Ok(BpfLoader::LibbpfSkel)
+                } else {
+                    Err(DeError::custom(
+                        "Invalid BPF loader, expecting one of \"aya\", \"libbpf\" or \"libbpf-skel\".",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_str(BpfLoaderVisitor)
     }
 }
 

@@ -1,3 +1,5 @@
+# einat Configuration File
+
 [defaults]
 ipv4_local_rule_pref = 200
 ipv6_local_rule_pref = 200
@@ -26,7 +28,7 @@ nat44 = true
 ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
-# External or outbound interface on which NAT would be performed.
+# External(outbound) interface on which NAT would be performed.
 if_name = "eth0"
 
 # Unlike NAT flags in CLI options, `nat44` and `nat66` are both disabled by default.
@@ -55,16 +57,36 @@ timeout_pkt_default = "5m"
 timeout_tcp_trans = "4m"
 timeout_tcp_est = "124m"
 
+# Max fragment tracking records allowed.
+frag_track_max_records = 65536
+
+# Max NAT binding records allowed, defaults to 65536 * 3(TCP, UDP and ICMP).
+# Note the default value is already the upper limit for a single external
+# address. If your network is under high pressure that taken up all ports,
+# try lowering timeout_pkt_* and/or timeout_tcp_* so unused port bindings can
+# be cleaned quicker thus can be reused.
+binding_max_records = 196608
+
+# Max connection tracking records allowed, this should be at least the same as
+# `binding_max_records`, defaults to `binding_max_records` * 2. Increase this
+# if you have more connections than the default value.
+ct_max_records = 393216
+
+# BPF loading backend used, one of "aya", "libbpf" or "libbpf-skel".
+# Requires respetive Cargo feature flag to be enabled on build, fallback to
+# other enabled loading backend if not available.
+bpf_loader = "aya"
+
 # Disable source nat for specified destination networks.
 no_snat_dests = [
     # "192.168.0.0/16"
 ]
 
 # This adds default external config with `match_address = "0.0.0.0/0`
-# or `match_address = "::/0` to match all IP addresses on interface.
+# and/or `match_address = "::/0` to match all IP addresses on interface.
 default_externals = true
 
-# Automatically configure hairpin routes
+# Automatically configure hairpinning routes
 [interfaces.ipv4_hairpin_route]
 # Enable the hairpin routing configuration, defaults to true if
 # `internal_if_names` is not empty, otherwise defaults to false.
@@ -73,10 +95,11 @@ internal_if_names = [
     # "lo",
     # "internal"
 ]
-# Hairpin IP protocols. You can also add "icmp" however it would be equivalent
-# to send packet back to sender due to "Endpoint-Independent Mapping" behavior
-# we have and ICMP does not distinguish between source query ID and destination
-# query ID, which is not very useful thus not included by default.
+# Hairpinning IP protocols. You can also add "icmp" here, however it would
+# results ICMP query packet to be send back to the sender due to combinated
+# effect of the "Endpoint-Independent Mapping" behavior and ICMP does not
+# distinguish between source query ID and destination query ID, this is not
+# very useful thus not including "icmp" by default.
 ip_protocols = ["tcp", "udp"]
 # Defaults to `defaults.ipv4_local_rule_pref`.
 ip_rule_pref = 200
@@ -92,12 +115,14 @@ ip_rule_pref = 200
 # Defaults to `defaults.ipv6_hairpin_table_id`.
 table_id = 4787
 
+# Configure external address that NAT or not NAT to it.
 # The first static or matching address would be used as NAT external address.
 # External config defined first has higher priority.
 [[interfaces.externals]]
 # Specify a static external address for NAT
 address = "192.168.4.2"
-# The address would not be used as NAT external address if this is `true`.
+# If `true`, the address would not be used as NAT external address,
+# and packet flow from or to this source address would pass through NAT.
 no_snat = false
 # Disable hairpinning for the address.
 no_hairpin = false

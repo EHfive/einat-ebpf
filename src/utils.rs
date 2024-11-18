@@ -66,29 +66,97 @@ where
     }
 }
 
-#[allow(dead_code)]
-pub trait IpNetwork: Sized {
-    type Addr;
+pub trait IpAddress: Sized {
+    type Data;
     const LEN: u8;
-
-    fn prefix_len(&self) -> u8;
-
-    fn addr(&self) -> Self::Addr;
 
     fn is_unspecified(&self) -> bool;
 
     fn ip_addr(&self) -> IpAddr;
 
-    fn from_addr(addr: Self::Addr) -> Self;
+    fn data(&self) -> Self::Data;
 
     fn from_ip_addr(addr: IpAddr) -> Option<Self>;
 
     fn unspecified() -> Self;
 }
 
+#[allow(dead_code)]
+pub trait IpNetwork: Sized {
+    type Addr: IpAddress;
+
+    fn prefix_len(&self) -> u8;
+
+    fn addr(&self) -> Self::Addr;
+
+    fn from(addr: Self::Addr, prefix_len: u8) -> Self;
+
+    fn from_addr(addr: Self::Addr) -> Self {
+        Self::from(addr, Self::Addr::LEN)
+    }
+}
+
+impl IpAddress for Ipv4Addr {
+    type Data = [u8; 4];
+    const LEN: u8 = 32;
+
+    fn is_unspecified(&self) -> bool {
+        self.is_unspecified()
+    }
+
+    fn ip_addr(&self) -> IpAddr {
+        IpAddr::V4(*self)
+    }
+
+    fn data(&self) -> Self::Data {
+        self.octets()
+    }
+
+    fn from_ip_addr(addr: IpAddr) -> Option<Self> {
+        if let IpAddr::V4(v4) = addr {
+            Some(v4)
+        } else {
+            None
+        }
+    }
+
+    fn unspecified() -> Self {
+        Self::UNSPECIFIED
+    }
+}
+
+#[cfg(feature = "ipv6")]
+impl IpAddress for Ipv6Addr {
+    type Data = [u8; 16];
+    const LEN: u8 = 128;
+
+    fn is_unspecified(&self) -> bool {
+        self.is_unspecified()
+    }
+
+    fn ip_addr(&self) -> IpAddr {
+        IpAddr::V6(*self)
+    }
+
+    fn data(&self) -> Self::Data {
+        self.octets()
+    }
+
+    fn from_ip_addr(addr: IpAddr) -> Option<Self> {
+        if let IpAddr::V6(v6) = addr {
+            Some(v6)
+        } else {
+            None
+        }
+    }
+
+    fn unspecified() -> Self {
+        Self::UNSPECIFIED
+    }
+}
+
 impl IpNetwork for Ipv4Net {
     type Addr = Ipv4Addr;
-    const LEN: u8 = 32;
 
     fn prefix_len(&self) -> u8 {
         Ipv4Net::prefix_len(self)
@@ -98,35 +166,14 @@ impl IpNetwork for Ipv4Net {
         Ipv4Net::addr(self)
     }
 
-    fn is_unspecified(&self) -> bool {
-        self.addr().is_unspecified()
-    }
-
-    fn ip_addr(&self) -> IpAddr {
-        IpAddr::V4(self.addr())
-    }
-
-    fn from_addr(addr: Self::Addr) -> Self {
-        Ipv4Net::new(addr, Self::LEN).unwrap()
-    }
-
-    fn from_ip_addr(addr: IpAddr) -> Option<Self> {
-        if let IpAddr::V4(v4) = addr {
-            Some(Self::from_addr(v4))
-        } else {
-            None
-        }
-    }
-
-    fn unspecified() -> Self {
-        Self::from_addr(Ipv4Addr::UNSPECIFIED)
+    fn from(addr: Self::Addr, prefix_len: u8) -> Self {
+        Ipv4Net::new_assert(addr, prefix_len)
     }
 }
 
 #[cfg(feature = "ipv6")]
 impl IpNetwork for Ipv6Net {
     type Addr = Ipv6Addr;
-    const LEN: u8 = 128;
 
     fn prefix_len(&self) -> u8 {
         Ipv6Net::prefix_len(self)
@@ -136,28 +183,38 @@ impl IpNetwork for Ipv6Net {
         Ipv6Net::addr(self)
     }
 
+    fn from(addr: Self::Addr, prefix_len: u8) -> Self {
+        Ipv6Net::new_assert(addr, prefix_len)
+    }
+}
+
+impl<T> IpAddress for T
+where
+    T: IpNetwork,
+    T::Addr: IpAddress,
+{
+    type Data = <T::Addr as IpAddress>::Data;
+    const LEN: u8 = <T::Addr as IpAddress>::LEN;
+
     fn is_unspecified(&self) -> bool {
         self.addr().is_unspecified()
     }
 
     fn ip_addr(&self) -> IpAddr {
-        IpAddr::V6(self.addr())
+        self.addr().ip_addr()
     }
 
-    fn from_addr(addr: Self::Addr) -> Self {
-        Ipv6Net::new(addr, Self::LEN).unwrap()
+    fn data(&self) -> Self::Data {
+        self.addr().data()
     }
 
     fn from_ip_addr(addr: IpAddr) -> Option<Self> {
-        if let IpAddr::V6(v6) = addr {
-            Some(Self::from_addr(v6))
-        } else {
-            None
-        }
+        let addr = T::Addr::from_ip_addr(addr)?;
+        Some(Self::from_addr(addr))
     }
 
     fn unspecified() -> Self {
-        Self::from_addr(Ipv6Addr::UNSPECIFIED)
+        Self::from_addr(T::Addr::unspecified())
     }
 }
 

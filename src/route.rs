@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
 use crate::config::IpProtocol;
-use crate::utils::IpNetwork;
+use crate::utils::{IpAddress, IpNetwork};
 
 impl From<IpProtocol> for RouteIpProtocol {
     fn from(value: IpProtocol) -> Self {
@@ -395,7 +395,7 @@ impl RouteIpNetwork for Ipv4Net {
     }
 
     fn from_route_address(address: &RouteAddress, prefix_len: u8) -> Option<Self> {
-        if prefix_len > Self::LEN {
+        if prefix_len > Self::Addr::LEN {
             return None;
         }
         if let RouteAddress::Inet(v4) = address {

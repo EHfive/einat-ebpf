@@ -3,8 +3,8 @@
 #include "einat.h"
 
 #define DEFAULT_FRAG_TRACK_MAX_ENTRIES 65536
-#define DEFAULT_BINDING_MAX_ENTRIES (65536 * 2)
-#define DEFAULT_CONNTRACK_MAX_ENTRIES (65536 * 2)
+#define DEFAULT_BINDING_MAX_ENTRIES (65536 * 3 * 2)
+#define DEFAULT_CONNTRACK_MAX_ENTRIES DEFAULT_BINDING_MAX_ENTRIES
 
 const volatile u8 LOG_LEVEL = BPF_LOG_LEVEL_DEBUG;
 
@@ -13,10 +13,10 @@ const volatile u8 HAS_ETH_ENCAP = true;
 
 const volatile u8 INGRESS_IPV4 = true;
 const volatile u8 EGRESS_IPV4 = true;
-#ifdef FEAT_IPV6
+
+// These are acted as paddings if not FEAT_IPV6
 const volatile u8 INGRESS_IPV6 = true;
 const volatile u8 EGRESS_IPV6 = true;
-#endif
 
 // Lookup external source address from FIB instead of using
 // g_ipv4_external_addr, requires Linux kernel>=6.7
@@ -774,7 +774,9 @@ static __always_inline void ipv4_update_csum_icmp_err(
     // update of inner message
 #if 1
     // the update of embedded layer 4 checksum is not required but may helpful
-    // for packet tracking the TCP checksum might not be included in IPv4
+    // for packet tracking
+
+    // the TCP checksum might not be included in IPv4
     // packet, check if it exists first
     if (bpf_skb_load_bytes(skb, err_l4_csum_off, &prev_csum,
                            sizeof(prev_csum))) {
@@ -1683,11 +1685,9 @@ ct_state_transition(u32 ifindex, u8 l4proto, u8 pkt_type, bool is_outbound,
 }
 
 static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
-    void *data_end = ctx_data_end(skb);
-    void *data = ctx_data(skb);
     bool is_ipv4;
     if (HAS_ETH_ENCAP) {
-        struct ethhdr *eth = data;
+        struct ethhdr *eth;
         if (VALIDATE_PULL(skb, &eth, 0, sizeof(*eth))) {
             return TC_ACT_SHOT;
         }
@@ -1702,7 +1702,7 @@ static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
             return TC_ACT_UNSPEC;
         }
     } else {
-        u8 *p_version = data;
+        u8 *p_version;
         if (VALIDATE_PULL(skb, &p_version, 0, sizeof(*p_version))) {
             return TC_ACT_SHOT;
         }
@@ -1730,7 +1730,8 @@ static __always_inline int get_is_ipv4(struct __sk_buff *skb, bool *is_ipv4_) {
 #define PKT_IS_IPV4() (true)
 #endif
 
-SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
+SEC("classifier")
+int ingress_rev_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "ingress<=="
     int ret;
     // XXX: separate out IPV4 and IPV6 outer branches and dispatch with tail
@@ -1827,7 +1828,7 @@ SEC("tc") int ingress_rev_snat(struct __sk_buff *skb) {
 #undef BPF_LOG_TOPIC
 }
 
-SEC("tc")
+SEC("classifier")
 int egress_snat(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "egress ==>"
     int ret;
