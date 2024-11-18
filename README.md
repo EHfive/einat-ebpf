@@ -22,9 +22,9 @@ For implementation details, see documentations under [reference](./docs/referenc
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
 -   Rust toolchain (`cargo` etc.)
 -   `clang` for compiling BPF C code
+-   `llvm-strip` for stripping compiled BPF object
 -   `libbpf` headers
 -   (optional) `pkg-config` to locate `libbpf` headers
--   `llvm-strip` for stripping compiled BPF object
 
 Additional dependencies for `"libbpf"` loader:
 
@@ -70,7 +70,7 @@ See also [cross-compilation guide](./docs/guide/cross-aya.md) for cross-compilat
 | `EINAT_BPF_CFLAGS`     | `-I/usr/include/<triplet>` | Specify extra CFLAGS for BPF object compilation |
 | `LIBBPF_NO_PKG_CONFIG` | `1`                        | Disable [pkg_config lookup] of libbpf.          |
 
-[pkg_config lookup]: (https://docs.rs/pkg-config/0.3.31/pkg_config/index.html#environment-variables)
+[pkg_config lookup]: https://docs.rs/pkg-config/0.3.31/pkg_config/index.html#environment-variables
 
 You can combine `LIBBPF_NO_PKG_CONFIG` and `EINAT_BPF_CFLAGS` to specify include flag of libbpf headers manually.
 

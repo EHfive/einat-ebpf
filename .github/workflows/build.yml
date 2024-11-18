@@ -13,19 +13,19 @@ jobs:
     strategy:
       max-parallel: 4
       matrix:
-        prefix: [static, ipv6-static]
+        preset: [static, ipv6_static]
         arch: [x86_64, aarch64]
 
     runs-on: ubuntu-latest
     env:
-      package_name: ${{ matrix.prefix }}-${{ matrix.arch }}-unknown-linux-musl
-      filename: einat-${{ matrix.prefix }}-${{ matrix.arch }}-unknown-linux-musl
+      package_name: ${{ matrix.preset }}-${{ matrix.arch }}-unknown-linux-musl
+      filename: einat-${{ matrix.preset }}-${{ matrix.arch }}-unknown-linux-musl
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v26
+        uses: cachix/install-nix-action@v30
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -49,9 +49,6 @@ jobs:
         with:
           path: builds
           merge-multiple: true
-
-      - name: Add execution permission
-        run: chmod +x builds/*
 
       - name: Release with builds
         uses: softprops/action-gh-release@v2
