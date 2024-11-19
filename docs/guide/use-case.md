@@ -113,9 +113,9 @@ However this only gives WireGuard "client" connecting this "server" an Address a
 To have Endpoint-Independent Mapping and Endpoint-Independent Filtering NAT behavior for traffic forwarding between WireGuard "client" and external interface on WireGuard "server", you can use `einat` instead of iptables/nftables masquerading. Also make sure iptables/nftables masquerade rules like above are removed if you are migrating from iptables/nftables masquerade to `einat`.
 
 ```
-$ sudo einat -i eth0 --nat44 --ports 20000-29999 --hairpin-if wg0
+$ sudo einat -i eth0 --nat44 --ports 20000-29999 --hairpin-if wg0 --internal <wg0 private network CIDR>
 ```
 
 You might also want to enable NAT66 for IPv6 with `--nat66` flag if you assign private IPv6 addresses instead of public IPv6 addresses to WireGuard peers.
 
-Note unlike iptables/nftables, you cannot filter by inbound interface in `einat` so `einat` would do NAT for all traffic forwarding to specified external interface regardless of inbound interface. And if you are hosting TCP/UDP services on same server, you might want to tweak external ports that `einat` uses so inbound initiated traffic towards unoccupied external ports are accepted. For example, the listening port of WireGuard service should not in range of external ports that `einat` uses(e.g. the default 20000-29999), tweak the port setting of either `einat` or WireGuard so inbound initiated traffic toward WireGuard service are accepted without filtering by `einat`.
+Note if you don't specify internal source addresses with `--internal` and you are hosting TCP/UDP services on the same server, you might want to tweak external ports that `einat` uses so inbound initiated traffic towards unoccupied external ports are accepted. For example, the listening port of WireGuard service should not in range of external ports that `einat` uses(e.g. the default 20000-29999), tweak the port setting of either `einat` or WireGuard so inbound initiated traffic toward WireGuard service are accepted without filtering by `einat`.

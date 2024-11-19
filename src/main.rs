@@ -12,9 +12,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use futures_util::StreamExt;
-use ipnet::Ipv4Net;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
+use ipnet::{IpNet, Ipv4Net};
 #[cfg(any(feature = "libbpf", feature = "libbpf-skel"))]
 use libbpf_rs::PrintLevel;
 use tokio::signal::unix::{signal, SignalKind};
@@ -40,7 +40,9 @@ OPTIONS:
       --nat66                  Enable NAT66/NAPT66 for specified network interface
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
+      --internal <CIDR> ...    Perform source NAT for these internal networks only
       --bpf-log <level>        BPF tracing log level, 0 to 5, defaults to 0, disabled
+      --bpf-loader <loader>    BPF loading backend used, one of aya or libbpf
   -v, --version                Print einat version
 ";
 
@@ -52,7 +54,9 @@ struct Args {
     nat66: bool,
     ports: Vec<ProtoRange>,
     hairpin_if_names: Vec<String>,
+    snat_internals: Vec<IpNet>,
     log_level: Option<u8>,
+    bpf_loader: Option<BpfLoader>,
 }
 
 fn parse_env_args() -> Result<Args> {
@@ -89,8 +93,15 @@ fn parse_env_args() -> Result<Args> {
                 let names: Result<Vec<_>, _> = parser.values()?.map(|s| s.parse()).collect();
                 args.hairpin_if_names = names?;
             }
+            Long("internal") => {
+                let internals: Result<Vec<_>, _> = parser.values()?.map(|s| s.parse()).collect();
+                args.snat_internals = internals?;
+            }
             Long("bpf-log") => {
                 args.log_level = Some(parser.value()?.parse()?);
+            }
+            Long("bpf-loader") => {
+                args.bpf_loader = Some(parser.value()?.parse()?);
             }
             _ => return Err(opt.unexpected().into()),
         }
@@ -569,6 +580,7 @@ fn main() -> Result<()> {
         let if_config = ConfigNetIf {
             if_name,
             bpf_log_level: args.log_level,
+            bpf_loader: args.bpf_loader,
             nat44,
             nat66,
             default_externals: true,

@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use serde::de::Error as DeError;
 use serde::{de::Visitor, Deserialize};
@@ -294,6 +294,23 @@ impl<'de> Deserialize<'de> for IpProtocol {
     }
 }
 
+impl FromStr for BpfLoader {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("aya") {
+            Ok(BpfLoader::Aya)
+        } else if s.eq_ignore_ascii_case("libbpf") {
+            Ok(BpfLoader::Libbpf)
+        } else if s.eq_ignore_ascii_case("libbpf-skel") {
+            Ok(BpfLoader::LibbpfSkel)
+        } else {
+            Err(anyhow!(
+                "Invalid BPF loader, expecting one of \"aya\", \"libbpf\" or \"libbpf-skel\".",
+            ))
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for BpfLoader {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -311,17 +328,7 @@ impl<'de> Deserialize<'de> for BpfLoader {
             where
                 E: serde::de::Error,
             {
-                if v.eq_ignore_ascii_case("aya") {
-                    Ok(BpfLoader::Aya)
-                } else if v.eq_ignore_ascii_case("libbpf") {
-                    Ok(BpfLoader::Libbpf)
-                } else if v.eq_ignore_ascii_case("libbpf-skel") {
-                    Ok(BpfLoader::LibbpfSkel)
-                } else {
-                    Err(DeError::custom(
-                        "Invalid BPF loader, expecting one of \"aya\", \"libbpf\" or \"libbpf-skel\".",
-                    ))
-                }
+                v.parse().map_err(DeError::custom)
             }
         }
 
@@ -337,9 +344,9 @@ impl Display for ProtoRange {
 
 impl FromStr for ProtoRange {
     type Err = anyhow::Error;
-    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some((start, end)) = s.split_once('-') else {
-            return Err(anyhow::anyhow!("missing '-' in port range"));
+            return Err(anyhow!("missing '-' in port range"));
         };
         let start: u16 = start.parse()?;
         let end: u16 = end.parse()?;
@@ -347,7 +354,7 @@ impl FromStr for ProtoRange {
         if start > end {
             // empty port range is valid for our bpf program but we explicitly disallow
             // it on parsing stage to notify user about potential misconfiguration
-            return Err(anyhow::anyhow!("empty port range"));
+            return Err(anyhow!("empty port range"));
         }
 
         Ok(ProtoRange {
