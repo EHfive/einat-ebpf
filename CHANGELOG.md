@@ -6,10 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Highlights
 
+-   Fix a bug that might cause silent packet drop, which has been observed on PPPoE interface for large packets.
 -   Use pure-rust Aya loader by default, einat now has zero native dependency except libc on target platform.
     This should make einat be built more easily especially for cross-compilation.
 -   Allow attaching eBPF programs with new TCX interface, aya loader only.
--   Fix a bug that might cause silent packet drop, which has been observed on PPPoE interface for large packets.
+-   Allow do SNAT for specified internal network only
+
+```bash
+# do SNAT for internal packets with source of 192.168.1.0/24 only
+einat -i extern0 --hairpin-if intern0 lo --internal 192.168.1.0/24
+```
 
 ### 🚀 Features
 
