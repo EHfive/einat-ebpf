@@ -52,7 +52,7 @@ Or build static binaries with Nix flakes we provide, run `nix flake show` to lis
 
 ```shell
 nix build "github:EHfive/einat-ebpf#static-x86_64-unknown-linux-musl"
-nix build "github:EHfive/einat-ebpf#ipv6-static-x86_64-unknown-linux-musl"
+nix build "github:EHfive/einat-ebpf#ipv6_static-x86_64-unknown-linux-musl"
 # Cross compile for aarch64
 nix build "github:EHfive/einat-ebpf#static-aarch64-unknown-linux-musl"
 ```
