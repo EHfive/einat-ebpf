@@ -47,6 +47,7 @@ pub enum AddressMatcher {
 #[serde(untagged)]
 pub enum AddressOrMatcher {
     Static { address: IpAddr },
+    Network { network: IpNet },
     Matcher { match_address: AddressMatcher },
 }
 
@@ -54,6 +55,8 @@ pub enum AddressOrMatcher {
 pub struct ConfigExternal {
     #[serde(flatten)]
     pub address: AddressOrMatcher,
+    #[serde(default)]
+    pub is_internal: bool,
     #[serde(default)]
     pub no_snat: bool,
     #[serde(default)]
@@ -71,16 +74,17 @@ pub struct ConfigExternal {
 }
 
 impl ConfigExternal {
-    fn match_any(is_ipv4: bool) -> Self {
-        let network_any = if is_ipv4 {
-            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap())
+    pub fn default_from(network: IpNet, is_matcher: bool) -> Self {
+        let address = if is_matcher {
+            AddressOrMatcher::Matcher {
+                match_address: AddressMatcher::Network(network),
+            }
         } else {
-            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap())
+            AddressOrMatcher::Network { network }
         };
         Self {
-            address: AddressOrMatcher::Matcher {
-                match_address: AddressMatcher::Network(network_any),
-            },
+            address,
+            is_internal: false,
             no_snat: false,
             no_hairpin: false,
             tcp_ranges: None,
@@ -92,11 +96,17 @@ impl ConfigExternal {
     }
 
     pub fn match_any_ipv4() -> Self {
-        Self::match_any(true)
+        Self::default_from(
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()),
+            true,
+        )
     }
 
     pub fn match_any_ipv6() -> Self {
-        Self::match_any(false)
+        Self::default_from(
+            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()),
+            true,
+        )
     }
 }
 
@@ -165,6 +175,8 @@ pub struct ConfigNetIf {
     pub ct_max_records: Option<u32>,
     #[serde(default = "default_true")]
     pub default_externals: bool,
+    #[serde(default)]
+    pub snat_internals: Vec<IpNet>,
     #[serde(default)]
     pub no_snat_dests: Vec<IpNet>,
     #[serde(default)]

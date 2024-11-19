@@ -10,7 +10,9 @@ use aya::util::KernelVersion;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
 use ipnet::{IpNet, Ipv4Net};
+use prefix_trie::map::Entry;
 use prefix_trie::{Prefix, PrefixMap, PrefixSet};
+use tracing::warn;
 
 use crate::config::{AddressOrMatcher, ConfigDefaults, ConfigExternal, ConfigNetIf, ProtoRange};
 use crate::route::IfAddresses;
@@ -58,6 +60,7 @@ struct ExternalRanges(Vec<RangeInclusive<u16>>);
 #[derive(Debug)]
 struct External {
     address: AddressOrMatcher,
+    is_internal: bool,
     no_snat: bool,
     no_hairpin: bool,
     tcp_ranges: ExternalRanges,
@@ -139,29 +142,19 @@ impl LoadConfig {
 
 impl RuntimeConfigEval {
     pub fn try_from(if_config: &ConfigNetIf, defaults: &ConfigDefaults) -> Result<Self> {
-        let mut default_externals = Vec::new();
-        if if_config.default_externals {
-            if if_config.nat44() {
-                default_externals.push(ConfigExternal::match_any_ipv4());
-            }
-            if if_config.nat66() {
-                default_externals.push(ConfigExternal::match_any_ipv6());
-            }
-        }
-        let externals = if_config
-            .externals
-            .iter()
-            .chain(&default_externals)
-            .map(|external| External::try_from(external, defaults))
-            .collect::<Result<Vec<_>>>()?;
-
         fn unwrap_v4(network: &IpNet) -> Option<Ipv4Net> {
             if let IpNet::V4(network) = network {
-                Some(*network)
+                Some(network.trunc())
             } else {
                 None
             }
         }
+
+        let v4_internals = if_config
+            .snat_internals
+            .iter()
+            .filter_map(unwrap_v4)
+            .collect::<Vec<_>>();
 
         let v4_no_snat_dests = if_config
             .no_snat_dests
@@ -172,11 +165,18 @@ impl RuntimeConfigEval {
         #[cfg(feature = "ipv6")]
         fn unwrap_v6(network: &IpNet) -> Option<Ipv6Net> {
             if let IpNet::V6(network) = network {
-                Some(*network)
+                Some(network.trunc())
             } else {
                 None
             }
         }
+
+        #[cfg(feature = "ipv6")]
+        let v6_internals = if_config
+            .snat_internals
+            .iter()
+            .filter_map(unwrap_v6)
+            .collect::<Vec<_>>();
 
         #[cfg(feature = "ipv6")]
         let v6_no_snat_dests = if_config
@@ -184,6 +184,62 @@ impl RuntimeConfigEval {
             .iter()
             .filter_map(unwrap_v6)
             .collect::<Vec<_>>();
+
+        fn convert_internals<P: Into<IpNet> + IpNetwork>(internals: Vec<P>) -> Vec<ConfigExternal> {
+            if internals.is_empty() {
+                return Vec::new();
+            }
+
+            // add match all config to bypass SNAT
+            let mut external =
+                ConfigExternal::default_from(P::from(P::Addr::unspecified(), 0).into(), false);
+            external.no_snat = true;
+            external.no_hairpin = true;
+
+            let mut externals = vec![external];
+
+            for internal in internals {
+                if internal.prefix_len() == 0 {
+                    // the whole network is internal, return the default empty so SNAT is implicitly performed
+                    warn!("specify match all network as internal that clear our other internals");
+                    return Vec::new();
+                }
+                // add more specific internal config to enable SNAT explicitly
+                let mut external = ConfigExternal::default_from(internal.into(), false);
+                external.is_internal = true;
+
+                externals.push(external);
+            }
+
+            externals
+        }
+
+        let v4_internals = convert_internals(v4_internals);
+        cfg_if::cfg_if!(
+            if #[cfg(feature = "ipv6")] {
+                let v6_internals = convert_internals(v6_internals);
+            } else {
+                let v6_internals = Vec::new();
+            }
+        );
+
+        let mut default_externals = Vec::new();
+        if if_config.default_externals {
+            if if_config.nat44() {
+                default_externals.push(ConfigExternal::match_any_ipv4());
+            }
+            if if_config.nat66() {
+                default_externals.push(ConfigExternal::match_any_ipv6());
+            }
+        }
+
+        let externals = v4_internals
+            .iter()
+            .chain(&v6_internals)
+            .chain(&if_config.externals)
+            .chain(&default_externals)
+            .map(|external| External::try_from(external, defaults))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             v4_no_snat_dests,
@@ -265,6 +321,13 @@ impl<P: InetPrefix> InetConfig<P> {
                         }
                     }
                 }
+                AddressOrMatcher::Network { network } => {
+                    if let Some(network) = P::from_ipnet(network) {
+                        if !network.is_unspecified() {
+                            matches.push(network);
+                        }
+                    }
+                }
                 AddressOrMatcher::Matcher { match_address } => {
                     for address in addresses_set.iter() {
                         if match_address.contains(&address.ip_addr()) && !address.is_unspecified() {
@@ -278,24 +341,41 @@ impl<P: InetPrefix> InetConfig<P> {
                 addresses_set.remove(address);
             }
 
-            if external_addr.is_none() && !external.no_snat {
-                if let Some(first) = matches.first() {
-                    external_addr = Some(*first);
+            if external_addr.is_none() && !external.no_snat && !external.is_internal {
+                for network in matches.iter() {
+                    if !network.addr().is_unspecified() {
+                        external_addr = Some(*network);
+                        break;
+                    }
                 }
             }
 
             for network in matches {
-                let dest_value = dest_config.entry(network).or_default();
-                dest_value
-                    .flags
-                    .set(types::DestFlags::HAIRPIN, !external.no_hairpin);
+                let Entry::Vacant(ext_value) = external_config.entry(network) else {
+                    warn!("external config for {} already exists, skipping", network);
+                    continue;
+                };
+                let ext_value = ext_value.default();
 
-                let ext_value = external_config.entry(network).or_default();
-                ext_value
-                    .flags
-                    .set(types::ExternalFlags::NO_SNAT, external.no_snat);
+                if external.is_internal {
+                    ext_value.flags.set(types::ExternalFlags::IS_INTERNAL, true);
+                    // configs below are external only and should be inactive for internal
+                    continue;
+                }
+
+                if !external.no_hairpin {
+                    if IpNetwork::prefix_len(&network) == 0 {
+                        warn!("a match all network {} with hairpinning is mostly wrong, thus disable hairpinning for it.", &network)
+                    } else {
+                        let dest_value = dest_config.entry(network).or_default();
+                        dest_value
+                            .flags
+                            .set(types::DestFlags::HAIRPIN, external.no_hairpin);
+                    }
+                }
 
                 if external.no_snat {
+                    ext_value.flags.set(types::ExternalFlags::NO_SNAT, true);
                     continue;
                 }
 
@@ -452,6 +532,7 @@ impl External {
             address: external.address,
             no_snat: external.no_snat,
             no_hairpin: external.no_hairpin,
+            is_internal: external.is_internal,
             tcp_ranges,
             udp_ranges,
             icmp_ranges,

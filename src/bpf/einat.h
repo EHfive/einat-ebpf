@@ -133,6 +133,7 @@ struct external_config {
     u8 icmp_range_len;
     u8 icmp_in_range_len;
     u8 icmp_out_range_len;
+#define EXTERNAL_IS_INTERNAL_FLAG (1 << 0)
 #define EXTERNAL_NO_SNAT_FLAG (1 << 1)
     u8 flags;
 };

@@ -705,13 +705,22 @@ lookup_external_config(bool is_ipv4, const union u_inet_addr *external_addr) {
     }
 }
 
+static __always_inline bool is_internal(struct external_config *config) {
+    return config->flags & EXTERNAL_IS_INTERNAL_FLAG;
+}
+
 static __always_inline bool external_pass_nat(struct external_config *config) {
     return config->flags & EXTERNAL_NO_SNAT_FLAG;
 }
+
 static __always_inline int
 nat_check_external_config(struct external_config *config) {
     if (!config || external_pass_nat(config))
         return TC_ACT_UNSPEC;
+    if (is_internal(config)) {
+        // internal should not be seen by external
+        return TC_ACT_SHOT;
+    }
     return TC_ACT_OK;
 }
 
@@ -1886,7 +1895,7 @@ int egress_snat(struct __sk_buff *skb) {
         return TC_ACT_SHOT;
     }
 
-    if (ext_config) {
+    if (ext_config && !is_internal(ext_config)) {
         if (!nat_in_binding_range(ext_config, pkt.nexthdr,
                                   bpf_ntohs(pkt.tuple.sport))) {
             goto check_hairpin;

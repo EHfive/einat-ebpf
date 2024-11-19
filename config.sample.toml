@@ -29,7 +29,7 @@ ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 
 [[interfaces]]
 # External(outbound) interface on which NAT would be performed.
-if_name = "eth0"
+if_name = "eth2"
 
 # Unlike NAT flags in CLI options, `nat44` and `nat66` are both disabled by default.
 # Set either `nat44` or `nat66` to enable NAT.
@@ -82,14 +82,39 @@ bpf_loader = "aya"
 # Enabled by default on Linux kernel>=6.6
 prefer_tcx = true
 
-# Disable source nat for specified destination networks.
+# Disable source NAT for specified destination networks.
 no_snat_dests = [
     # "192.168.0.0/16"
 ]
 
-# This adds default external config with `match_address = "0.0.0.0/0`
+# This appends external config(s) with `match_address = "0.0.0.0/0`
 # and/or `match_address = "::/0` to match all IP addresses on interface.
 default_externals = true
+
+# Enable source NAT for internal source networks specified here only, all other
+# addresses would be seen as external routeable address. Note traffic with
+# SNAT-able(no_snat=false) external source address(traffic from NAT host itself)
+# would do SNAT regradless.
+#
+# This prepends the following external configs if the internals is not empty for
+# IPv4 or IPv6 respectively. Be careful to not include possible external
+# addresses here otherwise traffic would be blocked.
+#
+#
+#   [[interfaces.externals]]
+#   network = "0.0.0.0/0"  # "::/0" for IPv6
+#   no_snat = true
+#   no_hairpin = true
+#
+#   [[interfaces.externals]]
+#   network = "<network in snat_internals>"
+#   is_internal = true
+#   #...
+#
+snat_internals = [
+    # "192.168.1.0/24",
+    # "fc00::1:0/64"
+]
 
 # Automatically configure hairpinning routes
 [interfaces.ipv4_hairpin_route]
@@ -120,13 +145,22 @@ ip_rule_pref = 200
 # Defaults to `defaults.ipv6_hairpin_table_id`.
 table_id = 4787
 
-# Configure external address that NAT or not NAT to it.
-# The first static or matching address would be used as NAT external address.
-# External config defined first has higher priority.
+# Configure external source addresses that NAT or not NAT to it.
+# External configs are saved in prefix trie, hence config with more specific
+# address prefix would be used. In the case of configs with same evaluated
+# address prefix, config item defined earilier has higher priority. The first
+# static or matching address would be used as the default NAT external source.
 [[interfaces.externals]]
-# Specify a static external address for NAT
+# Specify a static external source for NAT
 address = "192.168.4.2"
-# If `true`, the address would not be used as NAT external address,
+# Or specify a static network as NAT external source, the address part(e.g.
+# 10.0.0.5) of this CIDR would be used as default NAT external source
+# if this config item got selected.
+network = "10.0.0.5/24"
+# If true, the specified address/network is marked as internal source instead
+# of NAT external source. And such internal source would do NAT explicitly.
+is_internal = false
+# If `true`, the address would not be used as target NAT source address,
 # and packet flow from or to this source address would pass through NAT.
 no_snat = false
 # Disable hairpinning for the address.
@@ -143,9 +177,9 @@ no_hairpin = false
 # masquerading for TCP to form a mixed NAT.
 #tcp_ranges = []
 
-[[interfaces.externals]]
 # Use `match_address` to match addresses on external interface specified.
-# Match a CIDR network
+[[interfaces.externals]]
+# Match a CIDR network, would evaluate to matched address(es) on the interface.
 match_address = "192.168.4.0/24"
 # This is equivalent to format above.
 match_address = { network = "192.168.4.0/24" }

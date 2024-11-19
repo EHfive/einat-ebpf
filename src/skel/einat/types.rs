@@ -127,6 +127,7 @@ bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
     #[repr(transparent)]
     pub struct ExternalFlags: u8 {
+        const IS_INTERNAL = 0b1;
         const NO_SNAT = 0b10;
     }
 }

@@ -5,9 +5,9 @@
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, Ipv4Addr};
 
-use ipnet::Ipv4Net;
 #[cfg(feature = "ipv6")]
 use ipnet::Ipv6Net;
+use ipnet::{IpNet, Ipv4Net};
 use prefix_trie::{map::Iter as PrefixMapIter, Prefix, PrefixMap};
 
 pub enum MapChange<'a, P, T> {
@@ -91,6 +91,8 @@ pub trait IpNetwork: Sized {
 
     fn from(addr: Self::Addr, prefix_len: u8) -> Self;
 
+    fn from_ipnet(net: IpNet) -> Option<Self>;
+
     fn from_addr(addr: Self::Addr) -> Self {
         Self::from(addr, Self::Addr::LEN)
     }
@@ -169,6 +171,14 @@ impl IpNetwork for Ipv4Net {
     fn from(addr: Self::Addr, prefix_len: u8) -> Self {
         Ipv4Net::new_assert(addr, prefix_len)
     }
+
+    fn from_ipnet(net: IpNet) -> Option<Self> {
+        if let IpNet::V4(v4) = net {
+            Some(v4)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(feature = "ipv6")]
@@ -186,6 +196,14 @@ impl IpNetwork for Ipv6Net {
     fn from(addr: Self::Addr, prefix_len: u8) -> Self {
         Ipv6Net::new_assert(addr, prefix_len)
     }
+
+    fn from_ipnet(net: IpNet) -> Option<Self> {
+        if let IpNet::V6(v6) = net {
+            Some(v6)
+        } else {
+            None
+        }
+    }
 }
 
 impl<T> IpAddress for T
@@ -197,7 +215,7 @@ where
     const LEN: u8 = <T::Addr as IpAddress>::LEN;
 
     fn is_unspecified(&self) -> bool {
-        self.addr().is_unspecified()
+        self.prefix_len() == Self::LEN && self.addr().is_unspecified()
     }
 
     fn ip_addr(&self) -> IpAddr {
