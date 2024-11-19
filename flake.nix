@@ -80,17 +80,17 @@
             enableStatic = true;
           };
 
-          ipv6-static-x86_64-unknown-linux-musl = crossPackage {
+          ipv6_static-x86_64-unknown-linux-musl = crossPackage {
             crossPkgs = pkgs.pkgsCross.musl64;
             enableStatic = true;
             enableIpv6 = true;
           };
-          ipv6-static-i686-unknown-linux-musl = crossPackage {
+          ipv6_static-i686-unknown-linux-musl = crossPackage {
             crossPkgs = pkgs.pkgsCross.musl32;
             enableStatic = true;
             enableIpv6 = true;
           };
-          ipv6-static-aarch64-unknown-linux-musl = crossPackage {
+          ipv6_static-aarch64-unknown-linux-musl = crossPackage {
             crossPkgs = pkgs.pkgsCross.aarch64-multiplatform-musl;
             enableStatic = true;
             enableIpv6 = true;
