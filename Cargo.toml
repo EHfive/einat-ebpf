@@ -47,7 +47,7 @@ async-stream = "0.3.6"
 aya = "0.13.1"
 aya-obj = "0.2.1"
 bitflags = { version = "2.6.0", features = ["bytemuck"] }
-bytemuck = { version = "1.19.0", features = ["derive"] }
+bytemuck = { version = "1.20.0", features = ["derive"] }
 cfg-if = "1.0.0"
 enum_dispatch = "0.3.13"
 fundu = "2.0.1"
