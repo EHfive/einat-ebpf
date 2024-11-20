@@ -62,7 +62,7 @@ impl EinatLibbpf {
 }
 
 impl EinatEbpf for EinatLibbpf {
-    const NAME: &str = "libbpf";
+    const NAME: &'static str = "libbpf";
 
     type MapBinding = Map;
     type MapCt = Map;

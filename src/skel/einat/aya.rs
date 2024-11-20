@@ -129,7 +129,7 @@ impl EinatAya {
 }
 
 impl EinatEbpf for EinatAya {
-    const NAME: &str = "Aya";
+    const NAME: &'static str = "Aya";
 
     type MapBinding = MapBinding;
     type MapCt = MapCt;

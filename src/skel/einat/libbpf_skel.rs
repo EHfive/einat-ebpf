@@ -53,7 +53,7 @@ unsafe impl Send for EinatLibbpfSkel {}
 unsafe impl Sync for EinatLibbpfSkel {}
 
 impl EinatEbpf for EinatLibbpfSkel {
-    const NAME: &str = "libbpf skeleton";
+    const NAME: &'static str = "libbpf skeleton";
 
     type MapBinding = Map;
     type MapCt = Map;
