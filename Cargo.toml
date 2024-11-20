@@ -1,6 +1,6 @@
 [package]
 name = "einat"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "GPL-2.0"
 authors = ["Huang-Huang Bao <i@eh5.me>"]
@@ -39,7 +39,9 @@ bindgen = ["libbpf-sys?/bindgen"]
 static = ["libbpf-sys?/static"]
 #
 # libbpf is vendrored and static in any case.
-#
+# Note currently there is a bug in libbpf-sys that prevent static linking if
+# system libbpf is present, delete system libbpf or /path/to/pkgconfig/libbpf.pc
+# to work around it. See https://github.com/libbpf/libbpf-sys/issues/112
 
 [dependencies]
 anyhow = "1.0.93"

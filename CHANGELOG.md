@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2024-11-20
+
+This is a hotfix addressing build error on Rust 1.80 on which is the minimal version that einat requires to build.
+
+### 🐛 Bug Fixes
+
+-   Elided lifetimes in associated constant
+
+### 🧪 Testing
+
+-   Add tests for einat skel
+
 ## [0.1.3] - 2024-11-19
 
 ### Highlights
