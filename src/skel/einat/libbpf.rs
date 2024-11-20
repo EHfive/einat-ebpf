@@ -72,7 +72,6 @@ impl EinatEbpf for EinatLibbpf {
         let mut open_obj = libbpf_rs::ObjectBuilder::default()
             .name("einat")
             .expect("failed to name obj as einat")
-            .debug(false)
             .open_memory(einat_obj_data())?;
 
         let mut map_ro_data = None;
