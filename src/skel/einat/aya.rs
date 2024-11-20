@@ -8,6 +8,7 @@ use std::net::Ipv6Addr;
 
 use anyhow::Result;
 use aya::maps::{Array, HashMap, LpmTrie, MapData};
+use aya::programs::links::LinkOrder;
 use aya::programs::tc::{
     qdisc_add_clsact, qdisc_detach_program, NlOptions, SchedClassifier, SchedClassifierLinkId,
     TcAttachOptions, TcAttachType,
@@ -196,8 +197,8 @@ impl EinatEbpf for EinatAya {
     fn attach(&mut self, if_name: &str, _if_index: u32) -> Result<Self::Links> {
         let (ingress_opt, egress_opt) = if self.use_tcx {
             (
-                TcAttachOptions::TcxOrder(Default::default()),
-                TcAttachOptions::TcxOrder(Default::default()),
+                TcAttachOptions::TcxOrder(LinkOrder::first()),
+                TcAttachOptions::TcxOrder(LinkOrder::first()),
             )
         } else {
             if let Err(e) = qdisc_add_clsact(if_name) {
