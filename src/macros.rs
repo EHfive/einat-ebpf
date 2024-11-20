@@ -13,7 +13,7 @@ macro_rules! derive_pod {
         }
     ) => {
         $( #[$attr] )*
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ::bytemuck::Zeroable, ::bytemuck::Pod)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, ::bytemuck::Zeroable, ::bytemuck::Pod)]
         $vis struct $name {
             $(
                $( #[$attr_f] )?

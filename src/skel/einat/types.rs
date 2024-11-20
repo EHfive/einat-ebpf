@@ -124,7 +124,7 @@ derive_pod!(
 );
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Zeroable, Pod)]
     #[repr(transparent)]
     pub struct ExternalFlags: u8 {
         const IS_INTERNAL = 0b1;
@@ -154,7 +154,7 @@ derive_pod!(
 );
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Zeroable, Pod)]
     #[repr(transparent)]
     pub struct DestFlags: u8 {
         const HAIRPIN = 0b01;
@@ -170,7 +170,7 @@ derive_pod!(
 );
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Zeroable, Pod)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Zeroable, Pod)]
     #[repr(transparent)]
     pub struct BindingFlags: u8 {
         const ORIG_DIR = 0b001;
