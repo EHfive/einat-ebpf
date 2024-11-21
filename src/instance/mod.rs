@@ -12,6 +12,7 @@ use anyhow::{anyhow, Result};
 use cfg_if::cfg_if;
 #[cfg(any(feature = "aya", feature = "libbpf", feature = "libbpf-skel"))]
 use enum_dispatch::enum_dispatch;
+use ipnet::IpNet;
 use tracing::{debug, info};
 
 use crate::skel::einat;
@@ -202,6 +203,7 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
     Ok(())
 }
 
+// FIXME: matching network prefix instead of simple `==` comparison
 fn remove_binding_and_ct_entries<T: EinatEbpf>(skel: &mut T, external_addr: IpAddr) -> Result<()> {
     let addr_flag = if external_addr.is_ipv4() {
         BindingFlags::ADDR_IPV4

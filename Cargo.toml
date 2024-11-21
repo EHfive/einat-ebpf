@@ -20,13 +20,13 @@ strip = true
 default = ["aya", "pkg-config"]
 # Enable IPv6 NAPT
 ipv6 = []
-# Enable Aya BPF loader, requires Rust>=1.80.0
+# Enable Aya BPF loader
 aya = [
     # the dep:aya is also used for determine kernel version so it's already included
 ]
 # Enable libbpf BPF loader
 libbpf = ["dep:libbpf-rs", "dep:libbpf-sys"]
-# Enable libbpf skeleton-wrapped BPF loader, requires unpublish self_cell for now
+# Enable libbpf skeleton-wrapped BPF loader
 libbpf-skel = [
     "dep:libbpf-rs",
     "dep:libbpf-sys",
@@ -39,9 +39,7 @@ bindgen = ["libbpf-sys?/bindgen"]
 static = ["libbpf-sys?/static"]
 #
 # libbpf is vendrored and static in any case.
-# Note currently there is a bug in libbpf-sys that prevent static linking if
-# system libbpf is present, delete system libbpf or /path/to/pkgconfig/libbpf.pc
-# to work around it. See https://github.com/libbpf/libbpf-sys/issues/112
+#
 
 [dependencies]
 anyhow = "1.0.93"

@@ -49,7 +49,10 @@ fn einat_obj_build() {
     // Specify environment variable LIBBPF_NO_PKG_CONFIG=1 to disable pkg-config lookup.
     // Or just disable the "pkg-config" feature.
     #[cfg(feature = "pkg-config")]
-    match pkg_config::probe_library("libbpf") {
+    match pkg_config::Config::new()
+        .cargo_metadata(false)
+        .probe("libbpf")
+    {
         Ok(libbpf) => {
             let includes = libbpf
                 .include_paths
