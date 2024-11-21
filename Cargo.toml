@@ -17,7 +17,7 @@ opt-level = "z"
 strip = true
 
 [features]
-default = ["aya", "pkg-config"]
+default = ["aya", "libbpf-skel", "pkg-config"]
 # Enable IPv6 NAPT
 ipv6 = []
 # Enable Aya BPF loader, requires Rust>=1.80.0
@@ -66,7 +66,7 @@ netlink-packet-route = "0.19.0"
 netlink-sys = "0.8.6"
 prefix-trie = "0.5.1"
 rtnetlink = "0.14.1"
-self_cell = { version = "1.0.4", git = "https://github.com/Voultapher/self_cell.git", optional = true }
+self_cell = { version = "1.0.4", optional = true }
 serde = { version = "1.0.215", features = ["derive"] }
 tokio = { version = "1.41.1", features = ["macros", "rt", "signal", "sync"] }
 toml = { version = "0.8.19", default-features = false, features = ["parse"] }

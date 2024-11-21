@@ -7,6 +7,7 @@ mod skel_build {
 use skel_build::types as einat_types;
 use skel_build::*;
 
+use std::cell::UnsafeCell;
 use std::mem;
 use std::net::Ipv4Addr;
 #[cfg(feature = "ipv6")]
@@ -18,7 +19,7 @@ use ipnet::Ipv4Net;
 use ipnet::Ipv6Net;
 use libbpf_rs::skel::{OpenSkel, SkelBuilder};
 use libbpf_rs::{MapHandle, OpenObject};
-use self_cell::{self_cell, MutBorrow};
+use self_cell::self_cell;
 
 use super::super::libbpf::LibbpfMap;
 use super::{EinatConstConfig, EinatEbpf, EinatEbpfInet, EinatRoData};
@@ -28,7 +29,7 @@ use super::libbpf_common::{attach, detach, EinatLibbpfLinks};
 
 self_cell!(
     struct OwnedSkel {
-        owner: MutBorrow<mem::MaybeUninit<OpenObject>>,
+        owner: UnsafeCell<mem::MaybeUninit<OpenObject>>,
 
         #[covariant]
         dependent: EinatSkel,
@@ -60,10 +61,14 @@ impl EinatEbpf for EinatLibbpfSkel {
     type Links = EinatLibbpfLinks;
 
     fn load(config: EinatConstConfig) -> Result<Self> {
-        let obj = MutBorrow::new(mem::MaybeUninit::zeroed());
+        let obj = UnsafeCell::new(mem::MaybeUninit::zeroed());
 
         let skel = OwnedSkel::try_new(obj, |obj| -> Result<_> {
-            let mut open_skel = EinatSkelBuilder::default().open(obj.borrow_mut())?;
+            // #Safety
+            // obj is only used here for construction of the skeleton
+            let obj = unsafe { &mut *obj.get() };
+
+            let mut open_skel = EinatSkelBuilder::default().open(obj)?;
             *open_skel.maps.rodata_data =
                 unsafe { mem::transmute::<EinatRoData, einat_types::rodata>(config.ro_data) };
 

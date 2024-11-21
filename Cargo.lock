@@ -1032,7 +1032,8 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 [[package]]
 name = "self_cell"
 version = "1.0.4"
-source = "git+https://github.com/Voultapher/self_cell.git#e58b85fb2364486495bc91e25404eed298ac609f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d369a96f978623eb3dc28807c4852d6cc617fed53da5d3c400feff1ef34a714a"
 
 [[package]]
 name = "semver"
