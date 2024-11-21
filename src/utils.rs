@@ -11,9 +11,19 @@ use ipnet::{IpNet, Ipv4Net};
 use prefix_trie::{map::Iter as PrefixMapIter, Prefix, PrefixMap};
 
 pub enum MapChange<'a, P, T> {
-    Insert(&'a P, &'a T),
-    Update(&'a P, &'a T),
-    Delete(&'a P),
+    Insert {
+        key: &'a P,
+        value: &'a T,
+    },
+    Update {
+        key: &'a P,
+        old: &'a T,
+        value: &'a T,
+    },
+    Delete {
+        key: &'a P,
+        old: &'a T,
+    },
 }
 
 pub struct PrefixMapDiff<'a, P, T> {
@@ -47,10 +57,14 @@ where
             for (key, value) in self.map_a_iter.by_ref() {
                 if let Some(other_value) = self.map_b.get(key) {
                     if other_value != value {
-                        return Some(MapChange::Update(key, other_value));
+                        return Some(MapChange::Update {
+                            key,
+                            old: &value,
+                            value: other_value,
+                        });
                     }
                 } else {
-                    return Some(MapChange::Delete(key));
+                    return Some(MapChange::Delete { key, old: &value });
                 }
             }
             self.map_a_finished = true
@@ -58,7 +72,7 @@ where
 
         for (key, value) in self.map_b_iter.by_ref() {
             if self.map_a.get(key).is_none() {
-                return Some(MapChange::Insert(key, value));
+                return Some(MapChange::Insert { key, value });
             }
         }
 
@@ -75,6 +89,8 @@ pub trait IpAddress: Sized {
     fn ip_addr(&self) -> IpAddr;
 
     fn data(&self) -> Self::Data;
+
+    fn from_data(data: Self::Data) -> Self;
 
     fn from_ip_addr(addr: IpAddr) -> Option<Self>;
 
@@ -114,6 +130,10 @@ impl IpAddress for Ipv4Addr {
         self.octets()
     }
 
+    fn from_data(data: Self::Data) -> Self {
+        From::from(data)
+    }
+
     fn from_ip_addr(addr: IpAddr) -> Option<Self> {
         if let IpAddr::V4(v4) = addr {
             Some(v4)
@@ -142,6 +162,10 @@ impl IpAddress for Ipv6Addr {
 
     fn data(&self) -> Self::Data {
         self.octets()
+    }
+
+    fn from_data(data: Self::Data) -> Self {
+        From::from(data)
     }
 
     fn from_ip_addr(addr: IpAddr) -> Option<Self> {
@@ -226,6 +250,10 @@ where
         self.addr().data()
     }
 
+    fn from_data(data: Self::Data) -> Self {
+        Self::from_addr(T::Addr::from_data(data))
+    }
+
     fn from_ip_addr(addr: IpAddr) -> Option<Self> {
         let addr = T::Addr::from_ip_addr(addr)?;
         Some(Self::from_addr(addr))
@@ -259,9 +287,9 @@ mod tests {
         let mut inserted = Vec::new();
         for change in PrefixMapDiff::new(&map_a, &map_b) {
             match change {
-                MapChange::Delete(key) => deleted.push(*key),
-                MapChange::Update(key, value) => updated.push((*key, value.clone())),
-                MapChange::Insert(key, value) => inserted.push((*key, value.clone())),
+                MapChange::Delete { key, .. } => deleted.push(*key),
+                MapChange::Update { key, value, .. } => updated.push((*key, value.clone())),
+                MapChange::Insert { key, value } => inserted.push((*key, value.clone())),
             }
         }
 

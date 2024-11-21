@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::ops::RangeInclusive;
 
 use anyhow::{anyhow, Result};
@@ -25,7 +25,12 @@ use crate::utils::{IpAddress, IpNetwork};
 pub struct LoadConfig(pub(super) einat::EinatConstConfig);
 
 pub trait InetPrefix:
-    IpNetwork<Addr: Display> + IpAddress + Copy + Prefix + PartialEq + Display
+    IpNetwork<Addr: Display>
+    + IpAddress<Data: for<'a> TryFrom<&'a [u8], Error: Debug>>
+    + Copy
+    + Prefix
+    + PartialEq
+    + Display
 {
 }
 

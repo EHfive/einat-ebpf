@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #![allow(dead_code)]
 
+use std::fmt::Debug;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, Ipv4Addr};
@@ -13,6 +14,7 @@ use ipnet::Ipv4Net;
 use ipnet::Ipv6Net;
 
 use crate::derive_pod;
+use crate::utils::IpAddress;
 
 pub const MAP_FRAG_TRACK: &str = "map_frag_track";
 pub const MAP_BINDING: &str = "map_binding";
@@ -223,6 +225,13 @@ derive_pod!(
         pub bpf_timer: [u64; 2],
     }
 );
+
+pub fn ip_address_from_inet_addr<'a, P: IpAddress>(addr: &'a InetAddr) -> P
+where
+    P::Data: TryFrom<&'a [u8], Error: Debug>,
+{
+    P::from_data((&(addr.inner[..(P::LEN as usize)])).try_into().unwrap())
+}
 
 impl From<Ipv4Addr> for InetAddr {
     #[cfg(feature = "ipv6")]

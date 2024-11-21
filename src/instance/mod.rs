@@ -5,24 +5,25 @@ mod config;
 pub use config::*;
 
 use std::borrow::Borrow;
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use cfg_if::cfg_if;
 #[cfg(any(feature = "aya", feature = "libbpf", feature = "libbpf-skel"))]
 use enum_dispatch::enum_dispatch;
-use ipnet::IpNet;
 use tracing::{debug, info};
 
 use crate::skel::einat;
-use crate::skel::einat::types::{BindingFlags, InetAddr};
+use crate::skel::einat::types::{
+    ip_address_from_inet_addr, BindingFlags, ExternalConfig, ExternalFlags, InetAddr,
+};
 use crate::skel::einat::{EinatEbpf, EinatEbpfInet, EinatEbpfSkel};
 use crate::skel::{
     EbpfHashMap, EbpfHashMapMut, EbpfLpmTrieMut, EbpfMapFlags, MapBindingKey, MapBindingValue,
     MapCtKey,
 };
-use crate::utils::{MapChange, PrefixMapDiff};
+use crate::utils::{IpAddress, IpNetwork, MapChange, PrefixMapDiff};
 
 #[allow(clippy::large_enum_variant)]
 #[cfg_attr(
@@ -165,36 +166,38 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
 
     for change in dest_config_diff {
         match change {
-            MapChange::Insert(k, v) | MapChange::Update(k, v) => {
-                debug!("update dest config of {}", k);
-                skel.map_dest_config().update(k, v, EbpfMapFlags::ANY)?;
+            MapChange::Insert { key, value } | MapChange::Update { key, value, .. } => {
+                debug!("update dest config of {}", key);
+                skel.map_dest_config()
+                    .update(key, value, EbpfMapFlags::ANY)?;
             }
-            MapChange::Delete(k) => {
-                debug!("delete dest config of {}", k);
-                skel.map_dest_config().delete(k)?;
+            MapChange::Delete { key, .. } => {
+                debug!("delete dest config of {}", key);
+                skel.map_dest_config().delete(key)?;
             }
         }
     }
 
     for change in external_config_diff {
         match change {
-            MapChange::Insert(k, v) => {
-                debug!("insert external config of {}", k);
+            MapChange::Insert { key, value } => {
+                debug!("insert external config of {}", key);
                 skel.map_external_config()
-                    .update(k, v, EbpfMapFlags::NO_EXIST)?;
+                    .update(key, value, EbpfMapFlags::NO_EXIST)?;
             }
-            MapChange::Update(k, v) => {
-                debug!("update external config of {}", k);
+            MapChange::Update { key, old, value } => {
+                debug!("update external config of {}", key);
                 skel.with_updating_wait(|skel| -> Result<()> {
-                    remove_binding_and_ct_entries(skel, k.ip_addr())?;
-                    skel.map_external_config().update(k, v, EbpfMapFlags::EXIST)
+                    remove_binding_and_ct_entries(skel, key, old)?;
+                    skel.map_external_config()
+                        .update(key, value, EbpfMapFlags::EXIST)
                 })??;
             }
-            MapChange::Delete(k) => {
-                debug!("delete external config of {}", k);
+            MapChange::Delete { key, old } => {
+                debug!("delete external config of {}", key);
                 skel.with_updating_wait(|skel| -> Result<()> {
-                    skel.map_external_config().delete(k)?;
-                    remove_binding_and_ct_entries(skel, k.ip_addr())
+                    skel.map_external_config().delete(key)?;
+                    remove_binding_and_ct_entries(skel, key, old)
                 })??;
             }
         }
@@ -204,17 +207,34 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
 }
 
 // FIXME: matching network prefix instead of simple `==` comparison
-fn remove_binding_and_ct_entries<T: EinatEbpf>(skel: &mut T, external_addr: IpAddr) -> Result<()> {
-    let addr_flag = if external_addr.is_ipv4() {
+fn remove_binding_and_ct_entries<T: EinatEbpf, P: InetPrefix>(
+    skel: &mut T,
+    external_network: &P,
+    external_config: &ExternalConfig,
+) -> Result<()> {
+    // there should be no record for internal addresses as external source
+    if external_config.flags.contains(ExternalFlags::IS_INTERNAL) {
+        return Ok(());
+    }
+
+    let addr_flag = if IpNetwork::prefix_len(external_network) == Ipv4Addr::LEN {
         BindingFlags::ADDR_IPV4
     } else {
         BindingFlags::ADDR_IPV6
     };
-    let external_addr: InetAddr = external_addr.into();
 
     // cleanup NAT binding records
 
     let mut to_delete = Vec::new();
+
+    let addr_matches = |flags: &BindingFlags, inet_addr: &InetAddr| {
+        if flags.contains(addr_flag) {
+            let addr = ip_address_from_inet_addr::<P>(inet_addr);
+            external_network.contains(&addr)
+        } else {
+            false
+        }
+    };
 
     for key in skel.map_binding().keys() {
         let key_owned = key?;
@@ -224,11 +244,11 @@ fn remove_binding_and_ct_entries<T: EinatEbpf>(skel: &mut T, external_addr: IpAd
             if let Some(binding) = skel.map_binding().lookup(key, EbpfMapFlags::ANY)? {
                 let binding: &MapBindingValue = binding.borrow();
 
-                if binding.flags.contains(addr_flag) && binding.to_addr == external_addr {
+                if addr_matches(&binding.flags, &binding.to_addr) {
                     to_delete.push(key_owned);
                 }
             }
-        } else if key.flags.contains(addr_flag) && key.from_addr == external_addr {
+        } else if addr_matches(&key.flags, &key.from_addr) {
             to_delete.push(key_owned);
         }
     }
@@ -243,7 +263,7 @@ fn remove_binding_and_ct_entries<T: EinatEbpf>(skel: &mut T, external_addr: IpAd
     for key in skel.map_ct().keys() {
         let key_owned = key?;
         let ct: &MapCtKey = key_owned.borrow();
-        if ct.flags.contains(addr_flag) && ct.external.src_addr == external_addr {
+        if addr_matches(&ct.flags, &ct.external.src_addr) {
             to_delete.push(key_owned);
         }
     }
