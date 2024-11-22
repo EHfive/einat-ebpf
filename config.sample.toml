@@ -35,7 +35,7 @@ if_name = "eth2"
 # Set either `nat44` or `nat66` to enable NAT.
 # Enable NAPT44
 nat44 = false
-# Enable NAPT66, this requires that einat was bulit with "ipv6" feature flag.
+# Enable NAPT66, this requires that einat was built with "ipv6" feature flag.
 nat66 = false
 
 # Set max BPF log level

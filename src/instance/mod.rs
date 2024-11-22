@@ -206,7 +206,6 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
     Ok(())
 }
 
-// FIXME: matching network prefix instead of simple `==` comparison
 fn remove_binding_and_ct_entries<T: EinatEbpf, P: InetPrefix>(
     skel: &mut T,
     external_network: &P,
