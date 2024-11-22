@@ -71,7 +71,8 @@ fn einat_obj_build() {
         "bpfeb"
     };
 
-    cmd.arg("-target")
+    let res = cmd
+        .arg("-target")
         .arg(target)
         .arg("-g")
         .arg("-O2")
@@ -81,13 +82,19 @@ fn einat_obj_build() {
         .arg(bpf_obj)
         .status()
         .expect("compile BPF object failed");
+    if !res.success() {
+        panic!("{}", res);
+    }
 
     // strip the DWARF debug information
-    Command::new("llvm-strip")
+    let res = Command::new("llvm-strip")
         .arg("--strip-debug")
         .arg(bpf_obj)
         .status()
         .expect("llvm-strip BPF object file failed");
+    if !res.success() {
+        panic!("{}", res);
+    }
 }
 
 #[cfg(feature = "libbpf-skel")]
@@ -112,4 +119,5 @@ fn main() {
     libbpf_skel_build();
 
     println!("cargo:rerun-if-changed={}", SRC_DIR);
+    println!("cargo:rerun-if-changed=build.rs");
 }
