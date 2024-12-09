@@ -10,7 +10,7 @@ To enable only the "libbpf" loader, specify Cargo flags `--no-default-features -
 Install `gcc-aarch64-linux-gnu` for cross linking. Install `clang` for bindgen and compile eBPF C code in this project.
 
 ```
-apt install gcc-aarch64-linux-gnu clang
+apt install gcc-aarch64-linux-gnu clang llvm
 ```
 
 Install `rustup` to get Rust>=1.74, see https://www.rust-lang.org/tools/install. Also make sure `rustfmt` is installed as it's used by `libbpf-cargo`.

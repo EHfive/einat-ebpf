@@ -136,7 +136,7 @@ To test if this works, you can use tools below on internal network behind NAT. N
 
 Instead of relying on existing Netfilter conntrack system like these out-of-tree kernel modules did, we implement a fully functional Endpoint Independent NAT engine on eBPF TC hook from scratch thus avoiding hassles dealing with "Address and Port-Dependent" Netfilter conntrack system and being slim and efficient.
 
-And `einat` utilizes libbpf's CO-RE(Compile Once – Run Everywhere) capabilities that hugely simplifies distribution and deployment.
+And `einat` utilizes aya's CO-RE(Compile Once – Run Everywhere) capabilities that hugely simplifies distribution and deployment.
 
 ## Recommended Reading
 

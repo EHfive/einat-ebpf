@@ -42,10 +42,17 @@ nat66 = false
 # 0: disable, 1: error, 2: warn, 3: info, 4: debug, 5: trace
 # View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
 bpf_log_level = 0
-# Enable external address(preferd source) lookup, recommended to enable.
+
+# Enable external address(preferred source) lookup, recommended to enable.
 # Only works on Linux kernel>=6.7, it's a no-op for kernel on lower version.
-# Enabled by default on Linux kernel>=6.9.
+#
+# If you enable this option, be careful to have external configs and SNAT
+# internals properly setting up for all possible preferred sources configured
+# in route table otherwise SNAT skipping or packet dropping could happen.
+#
+# Enabled by default on Linux kernel>=6.7.
 bpf_fib_lookup_external = true
+
 # Set this to `false` for early disabling inbound ICMP binding initiation,
 # similar to set `icmp_in_ranges = []`.
 allow_inbound_icmpx = true
@@ -62,6 +69,7 @@ timeout_tcp_est = "124m"
 frag_track_max_records = 65536
 
 # Max NAT binding records allowed, defaults to 65536 * 3(TCP, UDP and ICMP).
+#
 # Note the default value is already the upper limit for a single external
 # address. If your network is under high pressure that taken up all ports,
 # try lowering timeout_pkt_* and/or timeout_tcp_* so unused port bindings can
@@ -92,13 +100,18 @@ no_snat_dests = [
 default_externals = true
 
 # Enable source NAT for internal source networks specified here only, all other
-# addresses would be seen as external routeable address. Note traffic with
+# addresses would be seen as external routable address. Note traffic with
 # SNAT-able(no_snat=false) external source address(traffic from NAT host itself)
-# would do SNAT regradless.
+# would do SNAT regardless.
+#
+# This is useful only if you have external(public) addresses assigned to internal
+# hosts and you want to have traffic from those external addresses going trough
+# the interface that einat attaches without being SNATed.
 #
 # This prepends the following external configs if the internals is not empty for
 # IPv4 or IPv6 respectively. Be careful to not include possible external
-# addresses here otherwise traffic would be blocked.
+# addresses here otherwise traffic would be blocked. So if it's not required,
+# don't set this option.
 #
 #
 #   [[interfaces.externals]]
