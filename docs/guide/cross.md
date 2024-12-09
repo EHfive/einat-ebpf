@@ -10,7 +10,11 @@ To enable only the "libbpf" loader, specify Cargo flags `--no-default-features -
 Install `gcc-aarch64-linux-gnu` for cross linking. Install `clang` for bindgen and compile eBPF C code in this project.
 
 ```
-apt install gcc-aarch64-linux-gnu clang llvm
+apt install gcc-aarch64-linux-gnu clang
+# bpftool for BPF object stripping
+apt install linux-tools-common
+# Or use llvm-strip
+apt install llvm
 ```
 
 Install `rustup` to get Rust>=1.74, see https://www.rust-lang.org/tools/install. Also make sure `rustfmt` is installed as it's used by `libbpf-cargo`.
@@ -47,6 +51,7 @@ export CFLAGS_aarch64_unknown_linux_gnu="-I /usr/include/aarch64-linux-gnu -L /u
 ```
 
 Specify `EINAT_BPF_CFLAGS` if einat build script failed to locate libbpf headers.
+
 ```
 export EINAT_BPF_CFLAGS="-I /usr/include/aarch64-linux-gnu"
 ```

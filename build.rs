@@ -33,8 +33,10 @@ fn c_args() -> Vec<String> {
 
 #[cfg(any(feature = "aya", feature = "libbpf"))]
 fn einat_obj_build() {
+    use std::ffi::OsStr;
     use std::process::Command;
 
+    let bpf_obj_tmp = &out_path("einat.bpf.tmp.o");
     let bpf_obj = &out_path("einat.bpf.o");
 
     // compile BPF C code
@@ -79,22 +81,60 @@ fn einat_obj_build() {
         .arg("-c")
         .arg(SRC)
         .arg("-o")
-        .arg(bpf_obj)
+        .arg(bpf_obj_tmp)
         .status()
         .expect("compile BPF object failed");
     if !res.success() {
         panic!("{}", res);
     }
 
-    // strip the DWARF debug information
-    let res = Command::new("llvm-strip")
-        .arg("--strip-debug")
-        .arg(bpf_obj)
-        .status()
-        .expect("llvm-strip BPF object file failed");
-    if !res.success() {
-        panic!("{}", res);
+    fn strip_obj<S: AsRef<OsStr>>(strip_cmd: &str, target: S, source: S) -> Result<(), String> {
+        let mut args = strip_cmd.split_ascii_whitespace();
+        let cmd = args.next().unwrap();
+        let res = Command::new(cmd)
+            .args(args)
+            .arg(target)
+            .arg(source)
+            .status();
+
+        match res {
+            Ok(res) => {
+                if res.success() {
+                    return Ok(());
+                }
+                Err(format!("{}: {}", strip_cmd, res))
+            }
+            Err(err) => Err(format!("{}: {}", strip_cmd, err)),
+        }
     }
+
+    // strip the DWARF debug information
+    let strip_bpf_obj = || -> Result<(), String> {
+        if let Some(strip_cmd) = option_env!("EINAT_BPF_STRIP_CMD") {
+            return strip_obj(strip_cmd, bpf_obj, bpf_obj_tmp);
+        }
+
+        let res = strip_obj("bpftool gen object", bpf_obj, bpf_obj_tmp);
+        if res.is_ok() {
+            return res;
+        }
+        eprintln!("strip with bpftool failed, fallback to llvm-strip");
+
+        let res = strip_obj("llvm-strip -g -o", bpf_obj, bpf_obj_tmp);
+        if res.is_ok() {
+            return res;
+        }
+        eprintln!("strip with llvm-strip failed, skip stripping");
+
+        std::fs::rename(bpf_obj_tmp, bpf_obj).unwrap();
+
+        Ok(())
+    };
+
+    strip_bpf_obj().expect("strip BPF object file failed");
+
+    println!("cargo:rerun-if-env-changed=EINAT_BPF_CFLAGS");
+    println!("cargo:rerun-if-env-changed=EINAT_BPF_STRIP_CMD");
 }
 
 #[cfg(feature = "libbpf-skel")]
@@ -120,4 +160,6 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", SRC_DIR);
     println!("cargo:rerun-if-changed=build.rs");
+
+    println!("cargo:rerun-if-changed=/null");
 }

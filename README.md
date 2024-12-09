@@ -22,7 +22,7 @@ For implementation details, see documentations under [reference](./docs/referenc
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
 -   Rust toolchain (`cargo` etc.)
 -   `clang` for compiling BPF C code
--   `llvm-strip` for stripping compiled BPF object
+-   `bpftool` or `llvm-strip` for stripping compiled BPF object
 -   `libbpf` headers
 -   (optional) `pkg-config` to locate `libbpf` headers
 
@@ -30,7 +30,7 @@ Additional dependencies for `"libbpf"` loader:
 
 -   `rustfmt` for formatting generated code
 -   `clang` libs for bindgen
--   `libelf` from elfutils and  `zlib` on target platform
+-   `libelf` from elfutils and `zlib` on target platform
 
 Currently we support `"aya"`, `"libbpf"` and `"libbpf-skel"` eBPF loaders, only the `"aya"` is enabled by default as it requires no native dependencies on target platform except libc.
 
@@ -65,10 +65,11 @@ See also [cross-compilation guide](./docs/guide/cross.md) for cross-compilation 
 
 ### Build Environment Variables
 
-| Name                   | Example Value              | Note                                            |
-| ---------------------- | -------------------------- | ----------------------------------------------- |
-| `EINAT_BPF_CFLAGS`     | `-I/usr/include/<triplet>` | Specify extra CFLAGS for BPF object compilation |
-| `LIBBPF_NO_PKG_CONFIG` | `1`                        | Disable [pkg_config lookup] of libbpf.          |
+| Name                   | Example Value              | Note                                                                        |
+| ---------------------- | -------------------------- | --------------------------------------------------------------------------- |
+| `EINAT_BPF_CFLAGS`     | `-I/usr/include/<triplet>` | Specify extra CFLAGS for BPF object compilation                             |
+| `EINAT_BPF_STRIP_CMD`  | `llvm-strip -g -o`         | BPF object stripping command, would followed by target path and source path |
+| `LIBBPF_NO_PKG_CONFIG` | `1`                        | Disable [pkg_config lookup] of libbpf.                                      |
 
 [pkg_config lookup]: https://docs.rs/pkg-config/0.3.31/pkg_config/index.html#environment-variables
 
