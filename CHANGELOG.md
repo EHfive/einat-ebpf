@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2024-12-09
+
+### 🐛 Bug Fixes
+
+-   Prevent pkg_config from emitting Cargo linking instructions
+-   Fix CLI arg --internal not being applied
+
+### Improve
+
+-   Re-enable libbpf logging
+-   TCX attach before all other links
+-   Prefix match binding & ct addresses with external network CIDR
+-   _(build)_ Error out if build commands not exit with success
+-   Allow using bpftool for stripping
+
 ## [0.1.4] - 2024-11-20
 
 This is a hotfix addressing build error on Rust 1.80 on which is the minimal version that einat requires to build.
