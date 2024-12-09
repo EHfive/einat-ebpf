@@ -189,10 +189,10 @@ mod tests {
                         .unwrap();
                 }
 
-                let keys_set = HashSet::<_, RandomState>::from_iter(keys.iter());
+                let mut keys_set = HashSet::<_, RandomState>::from_iter(keys.iter());
                 for k in skel.$map().keys() {
                     let k = k.unwrap();
-                    assert!(keys_set.contains(k.borrow()));
+                    assert!(keys_set.remove(k.borrow()));
                 }
 
                 let key = keys.pop().unwrap();
