@@ -584,6 +584,7 @@ fn main() -> Result<()> {
             nat44,
             nat66,
             default_externals: true,
+            snat_internals: args.snat_internals,
             ipv4_hairpin_route: hairpin_route.clone(),
             ipv6_hairpin_route: hairpin_route,
             ..Default::default()
