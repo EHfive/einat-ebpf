@@ -1,6 +1,6 @@
 [package]
 name = "einat"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "GPL-2.0"
 authors = ["Huang-Huang Bao <i@eh5.me>"]
@@ -42,7 +42,7 @@ static = ["libbpf-sys?/static"]
 #
 
 [dependencies]
-anyhow = "1.0.93"
+anyhow = "1.0.94"
 async-stream = "0.3.6"
 aya = "0.13.1"
 aya-obj = "0.2.1"
@@ -58,18 +58,18 @@ ipnet = { version = "2.10.1", features = ["serde"] }
 lexopt = "0.3.0"
 libbpf-rs = { version = "0.24.8", optional = true }
 libbpf-sys = { version = "1.5.0", optional = true }
-libc = "0.2.164"
+libc = "0.2.167"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
 netlink-sys = "0.8.6"
 prefix-trie = "0.5.1"
 rtnetlink = "0.14.1"
-self_cell = { version = "1.0.4", optional = true }
+self_cell = { version = "1.1.0", optional = true }
 serde = { version = "1.0.215", features = ["derive"] }
-tokio = { version = "1.41.1", features = ["macros", "rt", "signal", "sync"] }
+tokio = { version = "1.42.0", features = ["macros", "rt", "signal", "sync"] }
 toml = { version = "0.8.19", default-features = false, features = ["parse"] }
-tracing = { version = "0.1.40", default-features = false, features = ["std"] }
-tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.19", default-features = false, features = [
     "std",
     "fmt",
     "ansi",
