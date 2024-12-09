@@ -59,12 +59,12 @@ where
                     if other_value != value {
                         return Some(MapChange::Update {
                             key,
-                            old: &value,
+                            old: value,
                             value: other_value,
                         });
                     }
                 } else {
-                    return Some(MapChange::Delete { key, old: &value });
+                    return Some(MapChange::Delete { key, old: value });
                 }
             }
             self.map_a_finished = true
