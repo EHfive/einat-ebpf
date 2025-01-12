@@ -41,7 +41,6 @@ OPTIONS:
       --ports <range> ...      External TCP/UDP port ranges, defaults to 20000-29999
       --hairpin-if <name> ...  Hairpin internal network interface names, e.g. lo, lan0
       --internal <CIDR> ...    Perform source NAT for these internal networks only
-      --bpf-log <level>        BPF tracing log level, 0 to 5, defaults to 0, disabled
       --bpf-loader <loader>    BPF loading backend used, one of aya or libbpf
   -v, --version                Print einat version
 ";
