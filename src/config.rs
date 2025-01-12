@@ -238,7 +238,7 @@ impl<'de> Deserialize<'de> for Timeout {
         D: serde::Deserializer<'de>,
     {
         struct RangeVisitor;
-        impl<'de> Visitor<'de> for RangeVisitor {
+        impl Visitor<'_> for RangeVisitor {
             type Value = Timeout;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -265,7 +265,7 @@ impl<'de> Deserialize<'de> for IpProtocol {
         D: serde::Deserializer<'de>,
     {
         struct IpProtocolVisitor;
-        impl<'de> Visitor<'de> for IpProtocolVisitor {
+        impl Visitor<'_> for IpProtocolVisitor {
             type Value = IpProtocol;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -317,7 +317,7 @@ impl<'de> Deserialize<'de> for BpfLoader {
         D: serde::Deserializer<'de>,
     {
         struct BpfLoaderVisitor;
-        impl<'de> Visitor<'de> for BpfLoaderVisitor {
+        impl Visitor<'_> for BpfLoaderVisitor {
             type Value = BpfLoader;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -369,7 +369,7 @@ impl<'de> Deserialize<'de> for ProtoRange {
         D: serde::Deserializer<'de>,
     {
         struct RangeVisitor;
-        impl<'de> Visitor<'de> for RangeVisitor {
+        impl Visitor<'_> for RangeVisitor {
             type Value = ProtoRange;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
