@@ -35,6 +35,9 @@ Additional kernel configs required, you might need to add these to kernel config
 CONFIG_BPF_SYSCALL=y
 CONFIG_BPF_JIT=y
 CONFIG_NET_ACT_BPF=y
+
+# needed if using bpf_log_level >= 1
+CONFIG_BPF_EVENTS=y
 ```
 
 See https://github.com/iovisor/bcc/blob/master/docs/kernel_config.md for explanation on these BPF options.
