@@ -37,7 +37,7 @@ enum bpf_log_level {
 #define _bpf_log_logv(level, fmt, args...)                                     \
     ({                                                                         \
         if (BPF_LOG_LEVEL >= level && _bpf_check_printk(args)) {               \
-            bpf_printk("[b-f-c-n][" _##level##_TOKEN "] " BPF_LOG_TOPIC        \
+            bpf_printk("[einat][" _##level##_TOKEN "] " BPF_LOG_TOPIC        \
                                                      " : " fmt,                \
                        ##args);                                                \
         }                                                                      \
