@@ -122,6 +122,10 @@ see <https://github.com/EHfive/einat-ebpf/issues/19>. Though this only works for
 
 [TCP MSS clamping]: https://wiki.nftables.org/wiki-nftables/index.php/Mangling_packet_headers#Mangling_TCP_options
 
+> [!IMPORTANT]
+> Disable any hardware offload/acceleration solutions before trying out einat, especially on OpenWrt where "acceleration" solutions are commonly abused.
+> As hardware offload solution can't recognize NAT bindings created in einat, the incoming packets flowing over hardware firmware could be dropped due to some internal firewall policies.
+
 To test if this works, you can use tools below on internal network behind NAT. Notice you could only got "Full Cone" NAT if your external network is already "Full Cone" NAT or has a public IP.
 
 -   `stunclient` from [stuntman](https://github.com/jselbie/stunserver)

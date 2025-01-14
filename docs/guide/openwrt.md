@@ -7,6 +7,9 @@ So if the architecture of your router is not x86-64 or aarch64 or other actively
 
 The following is OpenWrt build configs required for `einat` to work.
 
+> [!IMPORTANT]
+> Disable any hardware offload/acceleration solutions before trying out einat.
+
 ## Build Configs
 
 Make sure to use latest OpenWrt release or OpenWrt on main branch.

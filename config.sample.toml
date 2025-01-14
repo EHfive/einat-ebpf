@@ -11,7 +11,7 @@ ipv6_hairpin_table_id = 4787
 # For ports not in specified ranges, einat would passthrough NAT if the traffic
 # is on interface's external address. You should exclude ports of services (
 # e.g. SSH, HTTP server) serving on NAT host's external address and expecting
-# inbound initiaed traffic from NAT port ranges specified here.
+# inbound initiated traffic from NAT port ranges specified here.
 tcp_ranges = ["20000-29999"]
 udp_ranges = ["20000-29999"]
 # Combined ICMP query ID ranges, must include `icmp_in_ranges` and `icmp_out_ranges`.
