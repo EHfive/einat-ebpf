@@ -33,7 +33,7 @@ Configuration file:
 -   Architecture: [e.g. x86-64, aarch64]
 -   Linux distribution and version: [e.g. Arch Linux (rolling), OpenWrt (v23.05.5)]
 -   Kernel version: [e.g. 5.15, 6.7.1]
--   einat version: [e.g. 0.1.1]
+-   einat version(`einat -v`): [e.g. `version: 0.1.5 features: aya build_features: pkg-config`]
 
 **Additional context**
 Add any other context about the problem here, e.g. network interface information, firewall(iptables/nftables) configuration.

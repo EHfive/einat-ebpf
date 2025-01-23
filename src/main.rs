@@ -69,7 +69,7 @@ fn parse_env_args() -> Result<Args> {
                 std::process::exit(0);
             }
             Short('v') | Long("version") => {
-                println!("v{}", env!("CARGO_PKG_VERSION"));
+                println!("{}", env!("EINAT_BUILD_INFO"));
                 std::process::exit(0);
             }
             Short('c') | Long("config") => {

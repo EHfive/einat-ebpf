@@ -151,12 +151,50 @@ fn libbpf_skel_build() {
         .unwrap();
 }
 
+fn gen_build_info() {
+    macro_rules! enabled_features {
+        ($($feat:literal),+) => {
+            &[ $(#[cfg(feature = $feat)] $feat),+ ]
+        };
+    }
+
+    let features: &[&str] = enabled_features!("ipv6", "aya", "libbpf", "libbpf-skel");
+    let build_features: &[&str] = enabled_features!("pkg-config", "bindgen", "static");
+    let features = features.join(",");
+    let build_features = build_features.join(",");
+
+    // IMPORTANT:
+    // use format `<key>: <value>[ <key>: <value>]+`, <key> and <value> should not contains any whitespace,
+    // so the printed build info text can be parsed.
+    let build_info = [
+        ("version", env!("CARGO_PKG_VERSION").to_string()),
+        ("features", features),
+        ("build_features", build_features),
+    ];
+
+    let build_info = build_info
+        .iter()
+        .map(|(k, v)| {
+            if v.is_empty() {
+                format!("{k}: <none>")
+            } else {
+                format!("{k}: {v}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    println!("cargo:rustc-env=EINAT_BUILD_INFO={}", build_info);
+}
+
 fn main() {
     #[cfg(any(feature = "aya", feature = "libbpf"))]
     einat_obj_build();
 
     #[cfg(feature = "libbpf-skel")]
     libbpf_skel_build();
+
+    gen_build_info();
 
     println!("cargo:rerun-if-changed={}", SRC_DIR);
     println!("cargo:rerun-if-changed=build.rs");
