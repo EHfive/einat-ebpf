@@ -22,29 +22,10 @@ let
 
   crossCC = "${crossPkgs.stdenv.cc}/bin/${crossPkgs.stdenv.cc.targetPrefix}cc";
 
-  buildInputs =
-    with crossPkgs;
-    [
-      ## runtime dependencies of libbpf-sys on target platform
-      stdenv.cc.libc
-      # elfutils already has static library built
-      elfutils
-    ]
-    ++ lib.optionals (!enableStatic) (
-      with crossPkgs;
-      [
-        zlib
-      ]
-    )
-    ++ lib.optionals enableStatic (
-      assert crossPkgs.hostPlatform.isMusl;
-      with crossPkgs.pkgsStatic;
-      [
-        zlib
-        #required by libelf
-        zstd
-      ]
-    );
+  buildInputs = with crossPkgs; [
+    ## runtime dependencies on target platform
+    stdenv.cc.libc
+  ];
 
   buildInputsSearchFlags = map (dep: "-L${lib.getLib dep}/lib") buildInputs;
 in
@@ -56,11 +37,7 @@ naersk'.buildPackage {
 
     # compile BPF C code
     llvmPackages.clang-unwrapped
-    llvmPackages.bintools-unwrapped
-
-    ## build dependencies of libbpf-sys on target platform
-    # for cross linking libelf and zlib, and make libbpf
-    crossPkgs.stdenv.cc
+    bpftools
   ];
   inherit buildInputs;
   strictDeps = true;
@@ -68,19 +45,12 @@ naersk'.buildPackage {
   cargoBuildOptions =
     orig:
     orig
-    ++ [
-      #"-Z build-std"
-      "--features aya,libbpf"
-    ]
     ++ lib.optionals enableStatic [
       "--features static"
     ]
     ++ lib.optionals enableIpv6 [
       "--features ipv6"
     ];
-
-  # bindgen libbpf for build platform and target platform
-  LIBCLANG_PATH = "${pkgs.clang.cc.lib}/lib";
 
   CARGO_BUILD_TARGET = targetTriple;
 
@@ -99,15 +69,9 @@ naersk'.buildPackage {
       "-C target-feature=${if enableStatic then "+" else "-"}crt-static"
     ]
     ++ buildInputsSearchFlags
-    ++ lib.optionals enableStatic [
-      "-lstatic=pthread"
-      "-lstatic=zstd"
-    ]
   );
 
   preBuild = ''
-    export BINDGEN_EXTRA_CLANG_ARGS_${targetUnderscore}="''${NIX_CFLAGS_COMPILE}";
-
     # Avoid adding host dependencies to CFLAGS and LDFLAGS for build platform
     if [[ ${pkgs.stdenv.cc.suffixSalt} != ${crossPkgs.stdenv.cc.suffixSalt} ]]; then
       export NIX_CC_WRAPPER_TARGET_HOST_${pkgs.stdenv.cc.suffixSalt}="";
