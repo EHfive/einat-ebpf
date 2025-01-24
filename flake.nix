@@ -54,7 +54,11 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        defaultPackage = defaultPackage' pkgs;
+        defaultPackage = defaultPackage' (
+          (import nixpkgs) {
+            inherit system;
+          }
+        );
         crossPackage = { ... }@args: crossPackage' ({ inherit pkgs; } // args);
       in
       {
@@ -66,6 +70,17 @@
         packages = {
           default = defaultPackage;
           ipv6 = defaultPackage;
+
+          verify_msrv_static-x86_64-unknown-linux-musl = crossPackage {
+            crossPkgs = pkgs.pkgsCross.musl64;
+            enableStatic = true;
+            rustVersion = "1.80.0";
+          };
+          verify_msrv_static-aarch64-unknown-linux-musl = crossPackage {
+            crossPkgs = pkgs.pkgsCross.aarch64-multiplatform-musl;
+            enableStatic = true;
+            rustVersion = "1.80.0";
+          };
 
           static-x86_64-unknown-linux-musl = crossPackage {
             crossPkgs = pkgs.pkgsCross.musl64;

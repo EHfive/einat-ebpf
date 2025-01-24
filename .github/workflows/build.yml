@@ -13,7 +13,7 @@ jobs:
     strategy:
       max-parallel: 4
       matrix:
-        preset: [static, ipv6_static]
+        preset: [static, ipv6_static, verify_msrv_static]
         arch: [x86_64, aarch64]
 
     runs-on: ubuntu-latest

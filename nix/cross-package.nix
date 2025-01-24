@@ -5,13 +5,14 @@
   targetTriple ? crossPkgs.hostPlatform.config,
   enableStatic ? false,
   enableIpv6 ? false,
+  rustVersion ? "latest"
 }:
 let
   inherit (pkgs) lib system;
   targetUnderscore = lib.replaceStrings [ "-" ] [ "_" ] targetTriple;
   targetUnderscoreUpper = lib.toUpper targetUnderscore;
 
-  toolchain = pkgs.rust-bin.stable.latest.minimal.override {
+  toolchain = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
     targets = [ targetTriple ];
   };
 
