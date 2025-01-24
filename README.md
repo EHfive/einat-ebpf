@@ -43,7 +43,7 @@ See also [OpenWrt guide](./docs/guide/openwrt.md) for pitfalls running this on O
 ## Installation
 
 ```shell
-cargo install --git https://github.com/EHfive/einat-ebpf.git
+cargo install --locked --git https://github.com/EHfive/einat-ebpf.git
 ```
 
 You can also enable IPv6 NAT66 feature with `--features ipv6` flag, however it would increase load time of eBPF programs to about 4 times.
