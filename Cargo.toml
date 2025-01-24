@@ -61,6 +61,8 @@ libbpf-sys = { version = "1.5.0", optional = true }
 libc = "0.2.169"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
+# 0.11.4 brings MSRV to 1.82
+netlink-proto = "=0.11.3"
 netlink-sys = "0.8.7"
 prefix-trie = "0.5.1"
 rtnetlink = "0.14.1"
