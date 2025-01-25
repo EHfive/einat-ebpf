@@ -37,6 +37,14 @@
         einat = defaultPackage' prev;
       };
 
+      cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+
+      verifyMsrvArgs = {
+        rustVersion = nixpkgs.lib.versions.pad 3 cargoToml."package"."rust-version";
+        enableStatic = true;
+        enableIpv6 = true;
+      };
+
       module = {
         imports = [
           (import ./nix/module.nix)
@@ -60,12 +68,6 @@
           }
         );
         crossPackage = { ... }@args: crossPackage' ({ inherit pkgs; } // args);
-
-        verifyMsrvArgs = {
-          rustVersion = "1.80.0";
-          enableStatic = true;
-          enableIpv6 = true;
-        };
       in
       {
         legacyPackages = (import nixpkgs) {
