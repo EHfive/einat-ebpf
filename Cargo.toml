@@ -22,7 +22,7 @@ default = ["aya", "pkg-config"]
 ipv6 = []
 # Enable Aya BPF loader
 aya = [
-    # the dep:aya is also used for determine kernel version so it's already included
+    # the dep:aya is also used for determining kernel version so it's already included
 ]
 # Enable libbpf BPF loader
 libbpf = ["dep:libbpf-rs", "dep:libbpf-sys"]
@@ -38,7 +38,7 @@ bindgen = ["libbpf-sys?/bindgen"]
 # Link against static `libelf` and `zlib` for libbpf loader.
 static = ["libbpf-sys?/static"]
 #
-# libbpf is vendrored and static in any case.
+# libbpf is vendored and static in any case.
 #
 
 [dependencies]
@@ -61,10 +61,9 @@ libbpf-sys = { version = "1.5.0", optional = true }
 libc = "0.2.169"
 netlink-packet-core = "0.7.0"
 netlink-packet-route = "0.19.0"
-# 0.11.4 brings MSRV to 1.82
-netlink-proto = "=0.11.3"
+netlink-proto = "0.11.5"
 netlink-sys = "0.8.7"
-prefix-trie = "0.5.1"
+prefix-trie = "0.6.0"
 rtnetlink = "0.14.1"
 self_cell = { version = "1.1.0", optional = true }
 serde = { version = "1.0.217", features = ["derive"] }
