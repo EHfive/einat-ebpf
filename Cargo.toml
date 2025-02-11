@@ -74,7 +74,7 @@ tokio = { version = "1.43.0", features = [
     "sync",
     "time",
 ] }
-toml = { version = "0.8.19", default-features = false, features = ["parse"] }
+toml = { version = "0.8.20", default-features = false, features = ["parse"] }
 tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.19", default-features = false, features = [
     "std",
