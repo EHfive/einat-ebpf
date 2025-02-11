@@ -32,7 +32,8 @@ ipv4_hairpin_route.internal_if_names = ["lo", "internal"]
 if_name = "eth2"
 
 # Unlike NAT flags in CLI options, `nat44` and `nat66` are both disabled by default.
-# Set either `nat44` or `nat66` to enable NAT.
+# Explicitly set either `nat44` or `nat66` to enable NAT.
+#
 # Enable NAPT44
 nat44 = false
 # Enable NAPT66, this requires that einat was built with "ipv6" feature flag.
@@ -40,7 +41,7 @@ nat66 = false
 
 # Set max BPF log level, developer facing debugging option,
 # would increases eBPF verification time if enabled.
-# You also set `--bpf-log <level>` for CLI.
+# You can also set `--bpf-log <level>` for CLI.
 # 0: disable, 1: error, 2: warn, 3: info, 4: debug, 5: trace
 # View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
 bpf_log_level = 0
