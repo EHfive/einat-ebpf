@@ -73,7 +73,7 @@ fn parse_env_args() -> Result<Args> {
                 std::process::exit(0);
             }
             Short('c') | Long("config") => {
-                args.config_file = Some(parser.value()?.parse()?);
+                args.config_file = Some(parser.value()?.into());
             }
             Short('i') | Long("ifname") => {
                 args.if_name = Some(parser.value()?.parse()?);
