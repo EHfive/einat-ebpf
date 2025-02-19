@@ -1298,9 +1298,19 @@ int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
         __bpf_unreachable();
 #endif
     }
-    int ret = bpf_fib_lookup(skb, &params, sizeof(params),
-                             BPF_FIB_LOOKUP_OUTPUT | BPF_FIB_LOOKUP_SKIP_NEIGH |
-                                 BPF_FIB_LOOKUP_SRC);
+
+    __u32 flags;
+#define FIB_LOOKUP_SRC_FLAGS_BASE                                              \
+    (BPF_FIB_LOOKUP_OUTPUT | BPF_FIB_LOOKUP_SKIP_NEIGH | BPF_FIB_LOOKUP_SRC)
+
+    if (bpf_core_field_exists(params.mark)) {
+        params.mark = skb->mark;
+        flags = FIB_LOOKUP_SRC_FLAGS_BASE | BPF_FIB_LOOKUP_MARK;
+    } else {
+        flags = FIB_LOOKUP_SRC_FLAGS_BASE;
+    }
+
+    int ret = bpf_fib_lookup(skb, &params, sizeof(params), flags);
     if (ret) {
         // The lookup would return -EINVAL if BPF_FIB_LOOKUP_SRC is not
         // supported on current kernel, we then can fallback to use defined
