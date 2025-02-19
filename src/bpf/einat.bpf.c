@@ -1278,22 +1278,28 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
 }
 
 int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
-                                          const union u_inet_addr *saddr,
-                                          const union u_inet_addr *daddr,
+                                          u8 l4proto,
+                                          const struct inet_tuple *origin,
                                           union u_inet_addr *to_addr) {
 #define BPF_LOG_TOPIC "egress_fib_lookup_src"
     struct bpf_fib_lookup params = {
         .family = is_ipv4 ? AF_INET : AF_INET6,
         .ifindex = skb->ifindex,
+        .l4_protocol = l4proto,
     };
 
+    if (!is_icmpx(l4proto)) {
+        params.sport = origin->sport;
+        params.dport = origin->dport;
+    }
+
     if (is_ipv4) {
-        params.ipv4_src = saddr->ip;
-        params.ipv4_dst = daddr->ip;
+        params.ipv4_src = origin->saddr.ip;
+        params.ipv4_dst = origin->daddr.ip;
     } else {
 #ifdef FEAT_IPV6
-        COPY_ADDR6(params.ipv6_src, saddr->ip6);
-        COPY_ADDR6(params.ipv6_dst, daddr->ip6);
+        COPY_ADDR6(params.ipv6_src, origin->saddr.ip6);
+        COPY_ADDR6(params.ipv6_dst, origin->daddr.ip6);
 #else
         __bpf_unreachable();
 #endif
@@ -1332,13 +1338,15 @@ int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
     }
 
     if (is_ipv4) {
-        bpf_log_trace("orig_src:%pI4, orig_dst:%pI4, src:%pI4, dst:%pI4",
-                      &saddr->ip, &daddr->ip, &params.ipv4_src,
-                      &params.ipv4_dst);
+        bpf_log_trace("orig_src:%pI4, orig_dst:%pI4, sport:%d, dport:%d, "
+                      "src:%pI4, dst:%pI4",
+                      &origin->saddr.ip, &origin->daddr.ip, origin->sport,
+                      origin->dport, &params.ipv4_src, &params.ipv4_dst);
     } else {
 #ifdef FEAT_IPV6
         bpf_log_trace("orig_src:%pI6, orig_dst:%pI6, src:%pI6, dst:%pI6",
-                      saddr->ip6, daddr->ip6, params.ipv6_src, params.ipv6_dst);
+                      &origin->saddr.ip6, &origin->daddr.ip6, params.ipv6_src,
+                      params.ipv6_dst);
 #endif
     }
 
@@ -1376,7 +1384,7 @@ egress_lookup_or_new_binding(struct __sk_buff *skb, bool is_ipv4, u8 l4proto,
 
         // XXX: use 0 as source address in the case of NAT64
         if (!ENABLE_FIB_LOOKUP_SRC ||
-            egress_fib_lookup_src(skb, nat_x_4, &origin->saddr, &origin->daddr,
+            egress_fib_lookup_src(skb, nat_x_4, l4proto, origin,
                                   &b_value_new.to_addr)) {
             if (nat_x_4) {
                 inet_addr_set_ip(&b_value_new.to_addr, g_ipv4_external_addr);
