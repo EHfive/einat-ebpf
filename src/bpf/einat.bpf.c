@@ -1345,7 +1345,7 @@ int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
     } else {
 #ifdef FEAT_IPV6
         bpf_log_trace("orig_src:%pI6, orig_dst:%pI6, src:%pI6, dst:%pI6",
-                      &origin->saddr.ip6, &origin->daddr.ip6, params.ipv6_src,
+                      origin->saddr.ip6, origin->daddr.ip6, params.ipv6_src,
                       params.ipv6_dst);
 #endif
     }

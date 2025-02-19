@@ -46,8 +46,13 @@ nat66 = false
 # View logs with `cat /sys/kernel/debug/tracing/trace_pipe`
 bpf_log_level = 0
 
-# Enable external address(preferred source) lookup, recommended to enable.
+# Enable external address(preferred source) lookup from Linux routing table and rules.
 # Only works on Linux kernel>=6.7, it's a no-op for kernel on lower version.
+#
+# Note the Linux routing table & rules are only served as database purpose.
+# For policy-based routing, it only matches `ip rule` selector `from`, `to`,
+# `fwmark`, `ipproto`, `sport`, `dport`, and/or `oif` of attached interface,
+# And it requires Linux kernel>=6.10 to match with `fwmark` selector.
 #
 # If you enable this option, be careful to have external configs and SNAT
 # internals properly setting up for all possible preferred sources configured
