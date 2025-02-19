@@ -373,9 +373,7 @@ impl<P: InetPrefix> InetConfig<P> {
                         warn!("a match all network {} with hairpinning is mostly wrong, thus disable hairpinning for it.", &network)
                     } else {
                         let dest_value = dest_config.entry(network).or_default();
-                        dest_value
-                            .flags
-                            .set(types::DestFlags::HAIRPIN, external.no_hairpin);
+                        dest_value.flags.set(types::DestFlags::HAIRPIN, true);
                     }
                 }
 
