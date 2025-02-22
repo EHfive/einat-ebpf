@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2025-02-22
+
+### Highlights
+
+-   Fixed hairpinning, it was broken since v0.0.3..
+-   `bpf_fib_lookup_external` now respect `ip rule` selectors `ipproto`, `sport`, `dport` and `fwmark` in addition to previously working `from`, `to` and `oif`.
+    This is useful for balancing traffic to multiple external source addresses in a static manner, see <https://github.com/EHfive/einat-ebpf/discussions/26>.
+
+### 🚀 Features
+
+-   Add features info to cli version info
+-   _(bpf)_ Lookup external source address with fwmark if possible
+-   _(bpf)_ Fib lookup route with layer 4 ports passed
+
+### 🐛 Bug Fixes
+
+-   Fix setting of hairpinning flag and route table
+
+### Improve
+
+-   Hide developer facing option --bpf-log from the help message
+-   _(bpf)_ Update the bpf log tag to [einat]
+-   Avoid converting OsString to String for config file path
+-   Explicitly specify encap type for IP tunnel link types
+
 ## [0.1.5] - 2024-12-09
 
 ### 🐛 Bug Fixes
