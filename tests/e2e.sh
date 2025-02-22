@@ -3,8 +3,6 @@ set -eux
 
 ip -all netns delete
 
-# enable forwarding
-
 ip netns add server1
 ip netns add server2
 ip netns add router
@@ -41,7 +39,7 @@ ip netns exec router ip link set br-lan up
 ip netns exec router ip link set veth_r_d1 up
 ip netns exec router ip link set veth_r_d2 up
 
-
+# router: enable forwarding
 ip netns exec router sysctl net.ipv4.ip_forward=1
 
 # device: setup network
@@ -81,9 +79,8 @@ ip netns exec device1 ping -c1 10.0.2.1
 ip netns exec device2 ping -c1 10.0.1.1
 ip netns exec device2 ping -c1 10.0.2.1
 
-
 # Create unreplied conntracks in router.
-# If we add one of these beforehand, the created conntrack would block connection from server's 3479 to device's 29999
+# Make sure if we add one of these beforehand, the created conntrack would not block connection from server's 3479 to device's 29999.
 ip netns exec server1 nc -uq0 -s 10.0.1.1 -p 3479 10.0.1.100 29999 <<<"test"
 ip netns exec server1 nc -uq0 -s 10.0.1.2 -p 3479 10.0.1.100 29999 <<<"test"
 ip netns exec router nc -uq0 -s 10.0.1.100 -p 29999 10.0.1.1 3479 <<<"test"
@@ -97,8 +94,7 @@ ip netns exec server1 stunserver --mode full --primaryinterface 10.0.1.1 --altin
 ip netns exec server2 stunserver --mode full --primaryinterface 10.0.2.1 --altinterface 10.0.2.2 &
 sleep 1
 
-
-# STUN NAT behavior test with out program
+# STUN NAT behavior test with our program
 ip netns exec device1 stunclient --mode full --localport 29999 10.0.1.1
 
 ip netns exec device1 stunclient --mode full --localport 29999 10.0.1.1 | grep -z "Endpoint Independent Mapping.*Endpoint Independent Filtering"
