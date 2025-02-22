@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Highlights
 
--   Fixed hairpinning, it was broken since v0.0.3..
+-   Fixed hairpinning, it was broken since v0.1.3..
 -   `bpf_fib_lookup_external` now respect `ip rule` selectors `ipproto`, `sport`, `dport` and `fwmark` in addition to previously working `from`, `to` and `oif`.
     This is useful for balancing traffic to multiple external source addresses in a static manner, see <https://github.com/EHfive/einat-ebpf/discussions/26>.
 
