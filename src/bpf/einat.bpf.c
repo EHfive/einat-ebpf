@@ -1277,7 +1277,7 @@ ingress_lookup_or_new_binding(u32 ifindex, bool is_ipv4,
     return TC_ACT_OK;
 }
 
-int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
+static int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
                                           u8 l4proto,
                                           const struct inet_tuple *origin,
                                           union u_inet_addr *to_addr) {
@@ -1309,12 +1309,12 @@ int __always_inline egress_fib_lookup_src(struct __sk_buff *skb, bool is_ipv4,
 #define FIB_LOOKUP_SRC_FLAGS_BASE                                              \
     (BPF_FIB_LOOKUP_OUTPUT | BPF_FIB_LOOKUP_SKIP_NEIGH | BPF_FIB_LOOKUP_SRC)
 
-    if (bpf_core_field_exists(params.mark)) {
-        params.mark = skb->mark;
-        flags = FIB_LOOKUP_SRC_FLAGS_BASE | BPF_FIB_LOOKUP_MARK;
-    } else {
+    // if (bpf_core_field_exists(params.mark)) {
+    //     params.mark = skb->mark;
+    //     flags = FIB_LOOKUP_SRC_FLAGS_BASE | BPF_FIB_LOOKUP_MARK;
+    // } else {
         flags = FIB_LOOKUP_SRC_FLAGS_BASE;
-    }
+    // }
 
     int ret = bpf_fib_lookup(skb, &params, sizeof(params), flags);
     if (ret) {
