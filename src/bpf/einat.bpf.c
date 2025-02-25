@@ -1501,8 +1501,9 @@ ingress_lookup_or_new_ct(u32 ifindex, bool is_ipv4, u8 l4proto, bool do_new,
     ct_value_new._pad[0] = 0;
     ct_value_new._pad[1] = 0;
     ct_value_new._pad[2] = 0;
-    ct_value_new.timer.__opaque[0] = 0;
-    ct_value_new.timer.__opaque[1] = 0;
+
+    struct bpf_timer timer = {};
+    ct_value_new.timer = timer;
 
     ct_value = insert_new_ct(l4proto, &ct_key, &ct_value_new);
     if (!ct_value) {
