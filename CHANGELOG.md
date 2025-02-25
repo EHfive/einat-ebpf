@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2025-02-25
+
+This is a hotfix that bring the minimum required Linux kernel version back to 5.15 .
+
+### 🐛 Bug Fixes
+
+-   Initialize struct bpf_timer without accessing its opaque fields
+
 ## [0.1.6] - 2025-02-22
 
 ### Highlights
