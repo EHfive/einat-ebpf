@@ -11,7 +11,7 @@ on:
 jobs:
   nix_build_static:
     strategy:
-      max-parallel: 4
+      max-parallel: 6
       matrix:
         preset: [static, ipv6_static, verify_msrv_ipv6_static]
         arch: [x86_64, aarch64]
