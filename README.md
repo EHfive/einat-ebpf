@@ -63,6 +63,10 @@ For OpenWrt, there are [openwrt-einat-ebpf](https://github.com/muink/openwrt-ein
 
 See also [cross-compilation guide](./docs/guide/cross.md) for cross-compilation on Debian/Debian-based distros.
 
+You can also download pre-built static binaries from [Releases](https://github.com/EHfive/einat-ebpf/releases) or our [Actions](https://github.com/EHfive/einat-ebpf/actions) artifacts(zip archived).
+
+For persisting einat in systemd-powered system manually, reference [example](./docs/example/) config and unit file, and see [Systemd](https://wiki.archlinux.org/title/Systemd) in famous‌ ArchWiki.
+
 ### Build Environment Variables
 
 | Name                   | Example Value              | Note                                                                        |
