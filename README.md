@@ -41,7 +41,39 @@ It's also required the eBPF JIT implementation for target architecture in kernel
 See also [OpenWrt guide](./docs/guide/openwrt.md) for pitfalls running this on OpenWrt.
 
 ## Installation
+Installing from an existing Releases
+```shell
+wget -O /usr/local/sbin/einat https://github.com/EHfive/einat-ebpf/releases/latest/download/einat-static-"$(arch)"-unknown-linux-musl
+chmod +x /usr/sbin/einat
+cat <<EOF > /etc/einat.toml
+[[interfaces]]
+if_name = "eth0"
+nat44 = true
 
+snat_internals = [
+    "100.64.0.0/24",
+]
+EOF
+cat <<EOF > /etc/systemd/system/einat.service
+[Unit]
+Description=Einat Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/einat --config /etc/einat.toml
+WorkingDirectory=/tmp
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now einat
+systemctl status einat
+```
+Install from build
 ```shell
 cargo install --locked --git https://github.com/EHfive/einat-ebpf.git
 ```
