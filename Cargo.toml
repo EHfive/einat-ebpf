@@ -42,12 +42,12 @@ static = ["libbpf-sys?/static"]
 #
 
 [dependencies]
-anyhow = "1.0.96"
+anyhow = "1.0.97"
 async-stream = "0.3.6"
 aya = "0.13.1"
 aya-obj = "0.2.1"
-bitflags = { version = "2.8.0", features = ["bytemuck"] }
-bytemuck = { version = "1.21.0", features = ["derive"] }
+bitflags = { version = "2.9.0", features = ["bytemuck"] }
+bytemuck = { version = "1.22.0", features = ["derive"] }
 cfg-if = "1.0.0"
 enum_dispatch = "0.3.13"
 fundu = "2.0.1"
@@ -58,16 +58,16 @@ ipnet = { version = "2.11.0", features = ["serde"] }
 lexopt = "0.3.0"
 libbpf-rs = { version = "0.24.8", optional = true }
 libbpf-sys = { version = "1.5.0", optional = true }
-libc = "0.2.170"
+libc = "0.2.171"
 netlink-packet-core = "0.7.0"
-netlink-packet-route = "0.19.0"
+netlink-packet-route = "0.22.0"
 netlink-proto = "0.11.5"
 netlink-sys = "0.8.7"
 prefix-trie = "0.6.0"
-rtnetlink = "0.14.1"
+rtnetlink = "0.16.0"
 self_cell = { version = "1.1.0", optional = true }
-serde = { version = "1.0.218", features = ["derive"] }
-tokio = { version = "1.43.0", features = [
+serde = { version = "1.0.219", features = ["derive"] }
+tokio = { version = "1.44.1", features = [
     "macros",
     "rt",
     "signal",
@@ -87,4 +87,4 @@ libbpf-sys = { version = "1.5.0", features = ["bindgen"], optional = true }
 
 [build-dependencies]
 libbpf-cargo = { version = "0.24.8", optional = true }
-pkg-config = { version = "0.3.31", optional = true }
+pkg-config = { version = "0.3.32", optional = true }

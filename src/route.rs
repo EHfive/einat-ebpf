@@ -14,7 +14,7 @@ use netlink_packet_core::NetlinkPayload;
 use netlink_packet_route::{
     address::AddressAttribute,
     link::{
-        InfoKind, LinkAttribute, LinkFlag, LinkInfo as AttrLinkInfo, LinkLayerType, LinkMessage,
+        InfoKind, LinkAttribute, LinkFlags, LinkInfo as AttrLinkInfo, LinkLayerType, LinkMessage,
     },
     neighbour::{NeighbourMessage, NeighbourState},
     route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
@@ -22,7 +22,7 @@ use netlink_packet_route::{
     AddressFamily, IpProtocol as RouteIpProtocol, RouteNetlinkMessage,
 };
 use netlink_sys::{AsyncSocket, SocketAddr};
-use rtnetlink::{new_connection, Handle, IpVersion, NeighbourAddRequest, RouteAddRequest};
+use rtnetlink::{new_connection, Handle, IpVersion, NeighbourAddRequest, RouteMessageBuilder};
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
@@ -79,7 +79,7 @@ impl LinkInfo {
     }
 
     pub fn is_up(&self) -> bool {
-        self.0.header.flags.contains(&LinkFlag::Up)
+        self.0.header.flags.contains(LinkFlags::Up)
     }
 
     pub fn address(&self) -> Option<&Vec<u8>> {
@@ -360,14 +360,7 @@ pub enum MonitorEvent {
 
 pub trait RouteIpNetwork: IpNetwork + Copy + Eq {
     const FAMILY: AddressFamily;
-    const IP_VERSION: IpVersion;
     const IS_IPV4: bool;
-
-    fn route_add_set_dest(
-        &self,
-        req: RouteAddRequest<()>,
-        gateway: Option<&Self>,
-    ) -> RouteAddRequest<Self::Addr>;
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest;
 
@@ -376,22 +369,7 @@ pub trait RouteIpNetwork: IpNetwork + Copy + Eq {
 
 impl RouteIpNetwork for Ipv4Net {
     const FAMILY: AddressFamily = AddressFamily::Inet;
-    const IP_VERSION: IpVersion = IpVersion::V4;
     const IS_IPV4: bool = true;
-
-    fn route_add_set_dest(
-        &self,
-        req: RouteAddRequest<()>,
-        gateway: Option<&Self>,
-    ) -> RouteAddRequest<Self::Addr> {
-        let req = req.v4().destination_prefix(self.addr(), self.prefix_len());
-        if let Some(gateway) = gateway {
-            if gateway != self {
-                return req.gateway(gateway.addr());
-            }
-        }
-        req
-    }
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest {
         handle.neighbours().add(if_index, IpAddr::V4(self.addr()))
@@ -412,22 +390,7 @@ impl RouteIpNetwork for Ipv4Net {
 #[cfg(feature = "ipv6")]
 impl RouteIpNetwork for Ipv6Net {
     const FAMILY: AddressFamily = AddressFamily::Inet6;
-    const IP_VERSION: IpVersion = IpVersion::V6;
     const IS_IPV4: bool = false;
-
-    fn route_add_set_dest(
-        &self,
-        req: RouteAddRequest<()>,
-        gateway: Option<&Self>,
-    ) -> RouteAddRequest<Self::Addr> {
-        let req = req.v6().destination_prefix(self.addr(), self.prefix_len());
-        if let Some(gateway) = gateway {
-            if gateway != self {
-                return req.gateway(gateway.addr());
-            }
-        }
-        req
-    }
 
     fn neigh_add(&self, if_index: u32, handle: &Handle) -> NeighbourAddRequest {
         handle.neighbours().add(if_index, IpAddr::V6(self.addr()))
@@ -540,15 +503,14 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
     }
 
     async fn add_route(&mut self, dest: N) -> Result<()> {
-        let req = self
-            .handle()
-            .route()
-            .add()
-            .replace()
+        let route = RouteMessageBuilder::<IpAddr>::new()
             .table_id(self.table_id)
-            .output_interface(self.external_if_index);
+            .output_interface(self.external_if_index)
+            .destination_prefix(dest.ip_addr(), dest.prefix_len())
+            .expect("invalid dest")
+            .build();
 
-        if let Err(e) = dest.route_add_set_dest(req, None).execute().await {
+        if let Err(e) = self.handle().route().add(route).execute().await {
             if !route_err_is_exist(&e) {
                 return Err(e.into());
             }
@@ -576,7 +538,11 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
     }
 
     async fn del_all_route(&mut self) -> Result<()> {
-        let mut s = self.handle().route().get(N::IP_VERSION).execute();
+        let mut route = RouteMessageBuilder::<IpAddr>::new().build();
+        route.header.address_family = N::FAMILY;
+
+        let mut s = self.handle().route().get(route).execute();
+
         while let Some(route) = s.try_next().await? {
             if self
                 .routes
@@ -881,7 +847,9 @@ mod tests {
     fn get_routes() {
         new_async_rt().block_on(async {
             let (_, rt_helper, _) = spawn_monitor().unwrap();
-            let req = rt_helper.handle.route().get(IpVersion::V4);
+            let mut route = RouteMessageBuilder::<IpAddr>::new().build();
+            route.header.address_family = AddressFamily::Inet;
+            let req = rt_helper.handle.route().get(route);
             let mut routes = req.execute();
             while let Some(route) = routes.try_next().await.unwrap() {
                 dbg!(route);
