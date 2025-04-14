@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] - 2025-04-14
+
+### 🐛 Bug Fixes
+
+- Fix a crash caused by IP address type conversion
+
+### Improve
+
+- Update deps & migrate to rtnetlink 0.16.0
+
 ## [0.1.7] - 2025-02-25
 
 This is a hotfix that bring the minimum required Linux kernel version back to 5.15 .
