@@ -230,7 +230,7 @@ pub fn ip_address_from_inet_addr<'a, P: IpAddress>(addr: &'a InetAddr) -> P
 where
     P::Data: TryFrom<&'a [u8], Error: Debug>,
 {
-    P::from_data((&(addr.inner[..(P::LEN as usize)])).try_into().unwrap())
+    P::from_data((&(addr.inner[..(P::LEN as usize) / 8])).try_into().unwrap())
 }
 
 impl From<Ipv4Addr> for InetAddr {
@@ -288,5 +288,31 @@ impl From<Ipv6Net> for Ipv6LpmKey {
             ip: value.addr().octets(),
             prefix_len: value.prefix_len() as _,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inet_addr_to_ip_addr() {
+        let inet_addr = InetAddr {
+            #[cfg(feature = "ipv6")]
+            inner: [192, 168, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff],
+            #[cfg(not(feature = "ipv6"))]
+            inner: [192, 168, 0, 1],
+        };
+
+        assert_eq!(
+            Ipv4Addr::new(192, 168, 0, 1),
+            ip_address_from_inet_addr::<Ipv4Addr>(&inet_addr)
+        );
+
+        #[cfg(feature = "ipv6")]
+        assert_eq!(
+            Ipv6Addr::new(0xc0a8, 1, 0, 0, 0, 0, 0, 0xffff),
+            ip_address_from_inet_addr::<Ipv6Addr>(&inet_addr)
+        );
     }
 }
