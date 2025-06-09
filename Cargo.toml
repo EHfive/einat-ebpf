@@ -5,7 +5,7 @@ edition = "2021"
 license = "GPL-2.0"
 authors = ["Huang-Huang Bao <i@eh5.me>"]
 repository = "https://github.com/EHfive/einat-ebpf"
-rust-version = "1.80"
+rust-version = "1.82"
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -46,8 +46,8 @@ anyhow = "1.0.98"
 async-stream = "0.3.6"
 aya = "0.13.1"
 aya-obj = "0.2.1"
-bitflags = { version = "2.9.0", features = ["bytemuck"] }
-bytemuck = { version = "1.22.0", features = ["derive"] }
+bitflags = { version = "2.9.1", features = ["bytemuck"] }
+bytemuck = { version = "1.23.1", features = ["derive"] }
 cfg-if = "1.0.0"
 enum_dispatch = "0.3.13"
 fundu = "2.0.1"
@@ -56,25 +56,25 @@ futures-util = { version = "0.3.31", default-features = false, features = [
 ] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 lexopt = "0.3.1"
-libbpf-rs = { version = "0.24.8", optional = true }
-libbpf-sys = { version = "1.5.0", optional = true }
-libc = "0.2.171"
+libbpf-rs = { version = "0.25.0", optional = true }
+libbpf-sys = { version = "1.5.1", optional = true }
+libc = "0.2.172"
 netlink-packet-core = "0.7.0"
-netlink-packet-route = "0.22.0"
+netlink-packet-route = "0.24.0"
 netlink-proto = "0.11.5"
 netlink-sys = "0.8.7"
 prefix-trie = "0.7.0"
-rtnetlink = "0.16.0"
+rtnetlink = "0.17.0"
 self_cell = { version = "1.2.0", optional = true }
 serde = { version = "1.0.219", features = ["derive"] }
-tokio = { version = "1.44.2", features = [
+tokio = { version = "1.45.1", features = [
     "macros",
     "rt",
     "signal",
     "sync",
     "time",
 ] }
-toml = { version = "0.8.20", default-features = false, features = ["parse"] }
+toml = { version = "0.8.23", default-features = false, features = ["parse"] }
 tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.19", default-features = false, features = [
     "std",
@@ -83,8 +83,8 @@ tracing-subscriber = { version = "0.3.19", default-features = false, features = 
 ] }
 
 [target.'cfg(not(target_arch="x86_64"))'.dependencies]
-libbpf-sys = { version = "1.5.0", features = ["bindgen"], optional = true }
+libbpf-sys = { version = "1.5.1", features = ["bindgen"], optional = true }
 
 [build-dependencies]
-libbpf-cargo = { version = "0.24.8", optional = true }
+libbpf-cargo = { version = "0.25.0", optional = true }
 pkg-config = { version = "0.3.32", optional = true }
