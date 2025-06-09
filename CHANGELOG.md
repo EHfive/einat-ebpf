@@ -2,15 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2025-06-09
+
+### 🐛 Bug Fixes
+
+-   Workaround libbpf divide by zero
+-   Ensure configuration is re-applied after interface down and re-up
+-   Use 2 different rtnetlink connetions for event listening and requesting
+
+### Improve
+
+-   Bump Rust MSRV to 1.82 & update deps
+
 ## [0.1.8] - 2025-04-14
 
 ### 🐛 Bug Fixes
 
-- Fix a crash caused by IP address type conversion
+-   Fix a crash caused by IP address type conversion
 
 ### Improve
 
-- Update deps & migrate to rtnetlink 0.16.0
+-   Update deps & migrate to rtnetlink 0.16.0
 
 ## [0.1.7] - 2025-02-25
 
