@@ -438,7 +438,8 @@ impl IfContext {
 }
 
 async fn daemon(config: Config, context: &mut DaemonContext) -> Result<JoinHandle<()>> {
-    let (monitor_task, rt_helper, events) = route::spawn_monitor()?;
+    let (monitor_task, events) = route::spawn_monitor()?;
+    let rt_helper = RouteHelper::spawn()?;
 
     for if_config in config.interfaces {
         let ctx = IfContext::new(config.defaults.clone(), if_config, rt_helper.clone())?;

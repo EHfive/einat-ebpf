@@ -187,6 +187,13 @@ impl LinkInfo {
 const ROUTE_LOCAL_TABLE_ID: u32 = 255;
 
 impl RouteHelper {
+    pub fn spawn() -> Result<Self> {
+        let (conn, handle, _) = new_connection()?;
+        tokio::spawn(conn);
+
+        Ok(Self { handle })
+    }
+
     pub async fn query_link_info(&self, if_name: &str) -> Result<Option<LinkInfo>> {
         let link = self
             .handle
@@ -685,12 +692,8 @@ fn link_msg_get_name(msg: LinkMessage) -> Option<String> {
 }
 
 /// This must be called from Tokio context.
-pub fn spawn_monitor() -> Result<(
-    JoinHandle<()>,
-    RouteHelper,
-    impl Stream<Item = MonitorEvent>,
-)> {
-    let (mut conn, handle, mut group_messages) = new_connection()?;
+pub fn spawn_monitor() -> Result<(JoinHandle<()>, impl Stream<Item = MonitorEvent>)> {
+    let (mut conn, _, mut group_messages) = new_connection()?;
 
     let groups = nl_mgrp(libc::RTNLGRP_IPV4_IFADDR) | nl_mgrp(libc::RTNLGRP_LINK);
     #[cfg(feature = "ipv6")]
@@ -728,7 +731,7 @@ pub fn spawn_monitor() -> Result<(
         }
     });
 
-    Ok((task, RouteHelper { handle }, events))
+    Ok((task, events))
 }
 
 fn route_err_is(e: &rtnetlink::Error, err_code: i32) -> bool {
@@ -810,7 +813,7 @@ mod tests {
     #[ignore = "netlink"]
     fn get_link() {
         new_async_rt().block_on(async {
-            let (_, rt_helper, _) = spawn_monitor().unwrap();
+            let rt_helper = RouteHelper::spawn().unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
                 rt_helper.query_link_info_by_index(1).await.unwrap();
             })
@@ -823,7 +826,7 @@ mod tests {
     #[ignore = "netlink"]
     fn get_addr() {
         new_async_rt().block_on(async {
-            let (_, rt_helper, _) = spawn_monitor().unwrap();
+            let rt_helper = RouteHelper::spawn().unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(1), async {
                 rt_helper.query_all_addresses(1).await.unwrap();
             })
@@ -836,7 +839,7 @@ mod tests {
     #[ignore = "netlink"]
     fn get_local_rule() {
         new_async_rt().block_on(async {
-            let (_, rt_helper, _) = spawn_monitor().unwrap();
+            let rt_helper = RouteHelper::spawn().unwrap();
             let rules = rt_helper.local_ip_rules(true).await.unwrap();
             dbg!(rules);
         })
@@ -846,7 +849,7 @@ mod tests {
     #[ignore = "netlink"]
     fn get_routes() {
         new_async_rt().block_on(async {
-            let (_, rt_helper, _) = spawn_monitor().unwrap();
+            let rt_helper = RouteHelper::spawn().unwrap();
             let mut route = RouteMessageBuilder::<IpAddr>::new().build();
             route.header.address_family = AddressFamily::Inet;
             let req = rt_helper.handle.route().get(route);
