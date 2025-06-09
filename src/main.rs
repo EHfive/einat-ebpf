@@ -202,6 +202,13 @@ impl IfContext {
         let addresses = self.rt_helper.query_all_addresses(if_index).await?;
         let is_new = self.ensure_instance(link_info.encap(), &addresses).await?;
 
+        let addresses = if is_new {
+            addresses
+        } else {
+            // re-fetch addresses and re-apply config if it's old instance
+            Default::default()
+        };
+
         let (inst, _) = self.inst.as_mut().expect("instance ensured");
         inst.attach(&self.if_name, if_index)?;
 
@@ -395,8 +402,9 @@ impl IfContext {
 
         let new_addresses = self.rt_helper.query_all_addresses(ctx.if_index).await?;
 
+        debug!("addresses {:?} -> {:?}", ctx.addresses, new_addresses);
+
         if new_addresses != ctx.addresses {
-            debug!("addresses {:?} -> {:?}", ctx.addresses, new_addresses);
             let rt_config = self.config_evaluator.eval(&new_addresses);
             inst.apply_config(rt_config)?;
             ctx.addresses = new_addresses;
