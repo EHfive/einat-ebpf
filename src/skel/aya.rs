@@ -98,6 +98,10 @@ where
         }
         let count = (keys_raw.len() / mem::size_of::<K>()) as u32;
 
+        if count == 0 {
+            return Ok(());
+        }
+
         let map_fd = self.map().fd().as_fd();
 
         unsafe { map_delete_batch(map_fd, &keys_raw, count, elem_flags.bits()) }

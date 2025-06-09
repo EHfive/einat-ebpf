@@ -75,13 +75,17 @@ impl<K: Pod, V: Pod, T: MapCore> EbpfHashMapMut<K, V> for LibbpfMap<T> {
         }
         let count = (keys_raw.len() / mem::size_of::<K>()) as u32;
 
-        MapCore::delete_batch(
-            &self.0,
-            &keys_raw,
-            count,
-            Into::into(elem_flags),
-            MapFlags::ANY,
-        )?;
+        if count != 0 {
+            // it crashes with divide by zero..
+            MapCore::delete_batch(
+                &self.0,
+                &keys_raw,
+                count,
+                Into::into(elem_flags),
+                MapFlags::ANY,
+            )?;
+        }
+
         Ok(())
     }
 }
