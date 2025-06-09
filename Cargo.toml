@@ -17,7 +17,7 @@ opt-level = "z"
 strip = true
 
 [features]
-default = ["aya", "pkg-config"]
+default = ["aya", "pkg-config", "libbpf-skel"]
 # Enable IPv6 NAPT
 ipv6 = []
 # Enable Aya BPF loader

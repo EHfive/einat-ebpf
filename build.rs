@@ -146,7 +146,6 @@ fn libbpf_skel_build() {
     SkeletonBuilder::new()
         .source(SRC)
         .clang_args(c_args())
-        .debug(true)
         .build_and_generate(&out)
         .unwrap();
 }

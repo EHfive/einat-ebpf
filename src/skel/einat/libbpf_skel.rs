@@ -64,8 +64,16 @@ impl EinatEbpf for EinatLibbpfSkel {
 
         let skel = OwnedSkel::try_new(obj, |obj| -> Result<_> {
             let mut open_skel = EinatSkelBuilder::default().open(obj.borrow_mut())?;
-            *open_skel.maps.rodata_data =
-                unsafe { mem::transmute::<EinatRoData, einat_types::rodata>(config.ro_data) };
+            open_skel
+                .maps
+                .rodata_data
+                .as_mut()
+                .map(|data| {
+                    **data = unsafe {
+                        mem::transmute::<EinatRoData, einat_types::rodata>(config.ro_data)
+                    }
+                })
+                .unwrap();
 
             open_skel
                 .maps
@@ -122,11 +130,19 @@ impl EinatEbpf for EinatLibbpfSkel {
 
     fn with_updating<T, F: FnOnce(&mut Self) -> T>(&mut self, f: F) -> Result<T> {
         self.skel.with_dependent_mut(|_, skel| {
-            skel.maps.data_data.g_deleting_map_entries = 1;
+            skel.maps
+                .data_data
+                .as_mut()
+                .map(|data| data.g_deleting_map_entries = 1)
+                .unwrap();
         });
         let r = f(self);
         self.skel.with_dependent_mut(|_, skel| {
-            skel.maps.data_data.g_deleting_map_entries = 0;
+            skel.maps
+                .data_data
+                .as_mut()
+                .map(|data| data.g_deleting_map_entries = 0)
+                .unwrap();
         });
         Ok(r)
     }
@@ -150,19 +166,24 @@ impl EinatEbpfInet<Ipv4Net> for EinatLibbpfSkel {
     type MapDestConfigMap = Map;
 
     fn external_addr(&self) -> Result<Ipv4Net> {
-        let addr = &self
+        let addr = self
             .skel
             .borrow_dependent()
             .maps
             .data_data
-            .g_ipv4_external_addr;
-        let octets: [u8; 4] = bytemuck::bytes_of(addr).try_into().unwrap();
+            .as_ref()
+            .map_or(Default::default(), |data| data.g_ipv4_external_addr);
+        let octets: [u8; 4] = bytemuck::bytes_of(&addr).try_into().unwrap();
         Ok(Ipv4Net::from_addr(Ipv4Addr::from(octets)))
     }
 
     fn set_external_addr(&mut self, addr: Ipv4Net) -> Result<()> {
         self.skel.with_dependent_mut(|_, skel| {
-            skel.maps.data_data.g_ipv4_external_addr = bytemuck::cast(addr.addr().octets());
+            skel.maps
+                .data_data
+                .as_mut()
+                .map(|data| data.g_ipv4_external_addr = bytemuck::cast(addr.addr().octets()))
+                .unwrap();
         });
         Ok(())
     }
@@ -183,19 +204,24 @@ impl EinatEbpfInet<Ipv6Net> for EinatLibbpfSkel {
     type MapDestConfigMap = Map;
 
     fn external_addr(&self) -> Result<Ipv6Net> {
-        let addr = &self
+        let addr = self
             .skel
             .borrow_dependent()
             .maps
             .data_data
-            .g_ipv6_external_addr;
-        let octets: [u8; 16] = bytemuck::bytes_of(addr).try_into().unwrap();
+            .as_ref()
+            .map_or(Default::default(), |data| data.g_ipv6_external_addr);
+        let octets: [u8; 16] = bytemuck::bytes_of(&addr).try_into().unwrap();
         Ok(Ipv6Net::from_addr(Ipv6Addr::from(octets)))
     }
 
     fn set_external_addr(&mut self, addr: Ipv6Net) -> Result<()> {
         self.skel.with_dependent_mut(|_, skel| {
-            skel.maps.data_data.g_ipv6_external_addr = bytemuck::cast(addr.addr().octets());
+            skel.maps
+                .data_data
+                .as_mut()
+                .map(|data| data.g_ipv6_external_addr = bytemuck::cast(addr.addr().octets()))
+                .unwrap();
         });
         Ok(())
     }
