@@ -116,7 +116,7 @@ struct DaemonContext {
 
 struct IfContextActive {
     if_index: u32,
-    addresses: IfAddresses,
+    addresses: Option<IfAddresses>,
     v4_hairpin_routing: Option<HairpinRouting<Ipv4Net>>,
     #[cfg(feature = "ipv6")]
     v6_hairpin_routing: Option<HairpinRouting<Ipv6Net>>,
@@ -199,15 +199,8 @@ impl IfContext {
             self.if_name
         );
 
-        let addresses = self.rt_helper.query_all_addresses(if_index).await?;
-        let is_new = self.ensure_instance(link_info.encap(), &addresses).await?;
-
-        let addresses = if is_new {
-            addresses
-        } else {
-            // re-fetch addresses and re-apply config if it's old instance
-            Default::default()
-        };
+        let addresses = self.ensure_instance(if_index, link_info.encap()).await?;
+        let addresses_applied = addresses.is_some();
 
         let (inst, _) = self.inst.as_mut().expect("instance ensured");
         inst.attach(&self.if_name, if_index)?;
@@ -220,7 +213,7 @@ impl IfContext {
             v6_hairpin_routing: self.v6_hairpin_routing(if_index),
         });
 
-        if is_new {
+        if addresses_applied {
             self.reconfigure_hairpin().await?;
         } else {
             self.reconfigure_addresses().await?;
@@ -302,13 +295,13 @@ impl IfContext {
 
     async fn ensure_instance(
         &mut self,
+        if_index: u32,
         if_encap: PacketEncap,
-        addresses: &IfAddresses,
-    ) -> Result<bool> {
+    ) -> Result<Option<IfAddresses>> {
         if let Some((_, curr_encap)) = &mut self.inst {
             // reuse instance if const configs have not changed
             if *curr_encap == if_encap {
-                return Ok(false);
+                return Ok(None);
             }
         }
 
@@ -327,7 +320,8 @@ impl IfContext {
         };
 
         let load_config = LoadConfig::from(&self.config, has_eth_encap);
-        let rt_config = self.config_evaluator.eval(addresses);
+        let addresses = self.rt_helper.query_all_addresses(if_index).await?;
+        let rt_config = self.config_evaluator.eval(&addresses);
         let loader = self.config.bpf_loader;
 
         let inst = tokio::task::spawn_blocking(move || -> Result<_> {
@@ -351,7 +345,7 @@ impl IfContext {
         .await??;
 
         self.inst = Some((inst, if_encap));
-        Ok(true)
+        Ok(Some(addresses))
     }
 
     async fn reconfigure_hairpin(&mut self) -> Result<()> {
@@ -404,10 +398,15 @@ impl IfContext {
 
         debug!("addresses {:?} -> {:?}", ctx.addresses, new_addresses);
 
-        if new_addresses != ctx.addresses {
+        let need_update = ctx
+            .addresses
+            .as_ref()
+            .map_or(true, |old| old != &new_addresses);
+
+        if need_update {
             let rt_config = self.config_evaluator.eval(&new_addresses);
             inst.apply_config(rt_config)?;
-            ctx.addresses = new_addresses;
+            ctx.addresses = Some(new_addresses);
         }
 
         self.reconfigure_hairpin().await?;
