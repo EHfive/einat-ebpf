@@ -38,6 +38,7 @@ unsafe impl Sync for EinatLibbpf {}
 
 impl EinatLibbpf {
     // XXX: mmap data map instead?
+    #[allow(unused)]
     fn get_data(&self) -> Result<EinatData> {
         let data = self
             .map_data

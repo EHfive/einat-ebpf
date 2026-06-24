@@ -115,6 +115,7 @@ impl EinatAya {
         })
     }
 
+    #[allow(unused)]
     fn get_data(&self) -> Result<EinatData> {
         let data = self.map_data.get(&0, 0)?;
         Ok(data)

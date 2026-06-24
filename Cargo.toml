@@ -43,52 +43,52 @@ static = ["libbpf-sys?/static"]
 #
 
 [dependencies]
-anyhow = "1.0.100"
+anyhow = "1.0.102"
 async-stream = "0.3.6"
 aya = "0.13.1"
 aya-obj = { version = "0.2.1", optional = true }
-bitflags = { version = "2.10.0", features = ["bytemuck"] }
-bytemuck = { version = "1.24.0", features = ["derive"] }
+bitflags = { version = "2.13.0", features = ["bytemuck"] }
+bytemuck = { version = "1.25.0", features = ["derive"] }
 cfg-if = "1.0.4"
 enum_dispatch = "0.3.13"
 fundu = "2.0.1"
-futures-util = { version = "0.3.31", default-features = false, features = [
+futures-util = { version = "0.3.32", default-features = false, features = [
     "std",
 ] }
-ipnet = { version = "2.11.0", features = ["serde"] }
-lexopt = "0.3.1"
-libbpf-rs = { version = "0.25.0", optional = true }
-libbpf-sys = { version = "1.5.1", optional = true }
-libc = "0.2.178"
+ipnet = { version = "2.12.0", features = ["serde"] }
+lexopt = "0.3.2"
+libbpf-rs = { version = "0.26.2", optional = true }
+libbpf-sys = { version = "1.7.0", optional = true }
+libc = "0.2.186"
 netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.26.0"
 netlink-proto = "0.12.0"
-netlink-sys = "0.8.7"
+netlink-sys = "0.8.8"
 prefix-trie = "0.8.1"
 rtnetlink = "0.19.0"
-self_cell = { version = "1.2.1", optional = true }
+self_cell = { version = "1.2.2", optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
-tokio = { version = "1.48.0", features = [
+tokio = { version = "1.52.3", features = [
     "macros",
     "rt",
     "signal",
     "sync",
     "time",
 ] }
-toml = { version = "0.9.8", default-features = false, features = [
+toml = { version = "1.1.2", default-features = false, features = [
     "parse",
     "serde",
 ] }
-tracing = { version = "0.1.43", default-features = false, features = ["std"] }
-tracing-subscriber = { version = "0.3.22", default-features = false, features = [
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
     "std",
     "fmt",
     "ansi",
 ] }
 
 [target.'cfg(not(target_arch="x86_64"))'.dependencies]
-libbpf-sys = { version = "1.5.1", features = ["bindgen"], optional = true }
+libbpf-sys = { version = "1.7.0", features = ["bindgen"], optional = true }
 
 [build-dependencies]
-libbpf-cargo = { version = "0.25.0", optional = true }
-pkg-config = { version = "0.3.32", optional = true }
+libbpf-cargo = { version = "0.26.2", optional = true }
+pkg-config = { version = "0.3.33", optional = true }

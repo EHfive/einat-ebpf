@@ -11,6 +11,11 @@ pub struct EinatLibbpfLinks {
     egress_hook: TcHook,
 }
 
+// Safety: TcHook is exclusively owned
+unsafe impl Send for EinatLibbpfLinks {}
+// Safety: mut guarded
+unsafe impl Sync for EinatLibbpfLinks {}
+
 pub(super) fn attach(
     prog_ingress: &Program,
     prog_egress: &Program,
