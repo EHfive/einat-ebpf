@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2023 Huang-Huang Bao
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-use std::io;
 use std::net::Ipv4Addr;
 #[cfg(feature = "ipv6")]
 use std::net::Ipv6Addr;
@@ -11,8 +10,9 @@ use aya::maps::{Array, HashMap, LpmTrie, MapData};
 use aya::programs::links::LinkOrder;
 use aya::programs::tc::{
     qdisc_add_clsact, qdisc_detach_program, NlOptions, SchedClassifier, SchedClassifierLinkId,
-    TcAttachOptions, TcAttachType,
+    TcAttachOptions, TcAttachType, TcError,
 };
+use aya::programs::TcHandle;
 use aya::util::KernelVersion;
 use aya::{Ebpf, EbpfLoader};
 use ipnet::Ipv4Net;
@@ -140,13 +140,13 @@ impl EinatEbpf for EinatAya {
     fn load(config: EinatConstConfig) -> Result<Self> {
         let mut loader = EbpfLoader::new();
 
-        macro_rules! set_global {
+        macro_rules! override_global {
             ($($k:ident),*) => {
-                $( loader.set_global(stringify!($k), &config.ro_data.$k, true); )*
+                $( loader.override_global(stringify!($k), &config.ro_data.$k, true); )*
             };
         }
 
-        set_global!(
+        override_global!(
             LOG_LEVEL,
             HAS_ETH_ENCAP,
             INGRESS_IPV4,
@@ -163,9 +163,9 @@ impl EinatEbpf for EinatAya {
             TIMEOUT_TCP_EST
         );
 
-        loader.set_max_entries(types::MAP_FRAG_TRACK, config.frag_track_max_entries);
-        loader.set_max_entries(types::MAP_BINDING, config.binding_max_entries);
-        loader.set_max_entries(types::MAP_CT, config.ct_max_entries);
+        loader.map_max_entries(types::MAP_FRAG_TRACK, config.frag_track_max_entries);
+        loader.map_max_entries(types::MAP_BINDING, config.binding_max_entries);
+        loader.map_max_entries(types::MAP_CT, config.ct_max_entries);
 
         let use_tcx = config.prefer_tcx
             && KernelVersion::current().is_ok_and(|v| v >= KernelVersion::new(6, 6, 0));
@@ -204,8 +204,10 @@ impl EinatEbpf for EinatAya {
             )
         } else {
             if let Err(e) = qdisc_add_clsact(if_name) {
-                if e.kind() != io::ErrorKind::AlreadyExists {
-                    return Err(e.into());
+                match e {
+                    // this could hit if clsact already exists
+                    TcError::NetlinkError(_) => {}
+                    _ => return Err(e.into()),
                 }
             };
 
@@ -215,12 +217,14 @@ impl EinatEbpf for EinatAya {
 
             (
                 TcAttachOptions::Netlink(NlOptions {
-                    handle: 1,
                     priority: 1,
+                    handle: TcHandle::from(1),
+                    classid: None,
                 }),
                 TcAttachOptions::Netlink(NlOptions {
-                    handle: 1,
                     priority: 1,
+                    handle: TcHandle::from(1),
+                    classid: None,
                 }),
             )
         };
