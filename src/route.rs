@@ -535,7 +535,7 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
         if let Some(ll_addr) = self.get_ll_addr().await? {
             let mut req = dest
                 .neigh_add(self.external_if_index, self.handle())
-                .link_local_address(&ll_addr)
+                .link_layer_address(&ll_addr)
                 .replace()
                 .state(NeighbourState::Permanent);
             let neigh = req.message_mut().clone();
