@@ -7,8 +7,8 @@ use std::mem;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 
 pub use ::aya::maps::{HashMap, LpmTrie};
-use anyhow::{anyhow, Result};
-use aya::maps::{lpm_trie::Key, IterableMap, MapData, MapError};
+use anyhow::{Result, anyhow};
+use aya::maps::{IterableMap, MapData, MapError, lpm_trie::Key};
 use aya_obj::generated::{bpf_attr, bpf_cmd};
 
 use super::{EbpfHashMap, EbpfHashMapMut, EbpfLpmTrie, EbpfLpmTrieMut, EbpfMapFlags};
@@ -24,27 +24,30 @@ unsafe fn map_delete_batch(
     count: u32,
     elem_flags: u64,
 ) -> Result<()> {
-    let mut attr = mem::zeroed::<bpf_attr>();
-    let batch = &mut attr.batch;
+    let mut attr = unsafe { mem::zeroed::<bpf_attr>() };
+    let batch = unsafe { &mut attr.batch };
 
     batch.keys = keys_raw.as_ptr() as _;
     batch.count = count;
     batch.map_fd = map_fd.as_raw_fd() as _;
     batch.elem_flags = elem_flags;
 
-    let ret = libc::syscall(
-        libc::SYS_bpf,
-        bpf_cmd::BPF_MAP_DELETE_BATCH,
-        &mut attr,
-        mem::size_of::<bpf_attr>(),
-    );
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_bpf,
+            bpf_cmd::BPF_MAP_DELETE_BATCH,
+            &mut attr,
+            mem::size_of::<bpf_attr>(),
+        )
+    };
     if ret < 0 {
         return Err(anyhow!(io::Error::last_os_error())
             .context(format!("bpf(BPF_MAP_DELETE_BATCH) failed with {}", ret)));
     }
 
+    let batch = unsafe { &attr.batch };
     // we don't want a partial deletion of batch
-    assert_eq!(count, attr.batch.count);
+    assert_eq!(count, batch.count);
     Ok(())
 }
 

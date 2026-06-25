@@ -152,7 +152,7 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
         &config.external_config,
     );
 
-    let set_addr = old.map_or(true, |old| old.external_addr != config.external_addr);
+    let set_addr = old.is_none_or(|old| old.external_addr != config.external_addr);
     if set_addr {
         if !config.external_addr.is_unspecified() {
             info!(

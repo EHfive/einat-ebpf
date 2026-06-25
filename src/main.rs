@@ -17,7 +17,7 @@ use ipnet::Ipv6Net;
 use ipnet::{IpNet, Ipv4Net};
 #[cfg(any(feature = "libbpf", feature = "libbpf-skel"))]
 use libbpf_rs::PrintLevel;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -311,7 +311,7 @@ impl IfContext {
             PacketEncap::Unsupported => {
                 return Err(anyhow::anyhow!(
                     "Interface has unsupported packet encapsulation"
-                ))
+                ));
             }
             PacketEncap::Unknown => {
                 warn!("unknown interface packet encapsulation type, fallback to no encap");
@@ -401,7 +401,7 @@ impl IfContext {
         let need_update = ctx
             .addresses
             .as_ref()
-            .map_or(true, |old| old != &new_addresses);
+            .is_none_or(|old| old != &new_addresses);
 
         if need_update {
             let rt_config = self.config_evaluator.eval(&new_addresses);
