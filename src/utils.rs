@@ -12,21 +12,21 @@ use prefix_trie::{map::Iter as PrefixMapIter, Prefix, PrefixMap};
 
 pub enum MapChange<'a, P, T> {
     Insert {
-        key: &'a P,
+        key: P,
         value: &'a T,
     },
     Update {
-        key: &'a P,
+        key: P,
         old: &'a T,
         value: &'a T,
     },
     Delete {
-        key: &'a P,
+        key: P,
         old: &'a T,
     },
 }
 
-pub struct PrefixMapDiff<'a, P, T> {
+pub struct PrefixMapDiff<'a, P: Prefix, T> {
     map_a: &'a PrefixMap<P, T>,
     map_b: &'a PrefixMap<P, T>,
     map_a_iter: PrefixMapIter<'a, P, T>,
@@ -34,7 +34,7 @@ pub struct PrefixMapDiff<'a, P, T> {
     map_a_finished: bool,
 }
 
-impl<'a, P, T> PrefixMapDiff<'a, P, T> {
+impl<'a, P: Prefix, T> PrefixMapDiff<'a, P, T> {
     pub fn new(map_a: &'a PrefixMap<P, T>, map_b: &'a PrefixMap<P, T>) -> Self {
         Self {
             map_a,
@@ -55,7 +55,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         if !self.map_a_finished {
             for (key, value) in self.map_a_iter.by_ref() {
-                if let Some(other_value) = self.map_b.get(key) {
+                if let Some(other_value) = self.map_b.get(&key) {
                     if other_value != value {
                         return Some(MapChange::Update {
                             key,
@@ -71,7 +71,7 @@ where
         }
 
         for (key, value) in self.map_b_iter.by_ref() {
-            if self.map_a.get(key).is_none() {
+            if self.map_a.get(&key).is_none() {
                 return Some(MapChange::Insert { key, value });
             }
         }
@@ -287,9 +287,9 @@ mod tests {
         let mut inserted = Vec::new();
         for change in PrefixMapDiff::new(&map_a, &map_b) {
             match change {
-                MapChange::Delete { key, .. } => deleted.push(*key),
-                MapChange::Update { key, value, .. } => updated.push((*key, value.clone())),
-                MapChange::Insert { key, value } => inserted.push((*key, value.clone())),
+                MapChange::Delete { key, .. } => deleted.push(key),
+                MapChange::Update { key, value, .. } => updated.push((key, value.clone())),
+                MapChange::Insert { key, value } => inserted.push((key, value.clone())),
             }
         }
 

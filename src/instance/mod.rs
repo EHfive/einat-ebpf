@@ -169,11 +169,11 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
             MapChange::Insert { key, value } | MapChange::Update { key, value, .. } => {
                 debug!("update dest config of {}", key);
                 skel.map_dest_config()
-                    .update(key, value, EbpfMapFlags::ANY)?;
+                    .update(&key, value, EbpfMapFlags::ANY)?;
             }
             MapChange::Delete { key, .. } => {
                 debug!("delete dest config of {}", key);
-                skel.map_dest_config().delete(key)?;
+                skel.map_dest_config().delete(&key)?;
             }
         }
     }
@@ -183,21 +183,21 @@ fn apply_inet_config<P: InetPrefix, T: EinatEbpf + EinatEbpfInet<P>>(
             MapChange::Insert { key, value } => {
                 debug!("insert external config of {}", key);
                 skel.map_external_config()
-                    .update(key, value, EbpfMapFlags::NO_EXIST)?;
+                    .update(&key, value, EbpfMapFlags::NO_EXIST)?;
             }
             MapChange::Update { key, old, value } => {
                 debug!("update external config of {}", key);
                 skel.with_updating_wait(|skel| -> Result<()> {
-                    remove_binding_and_ct_entries(skel, key, old)?;
+                    remove_binding_and_ct_entries(skel, &key, old)?;
                     skel.map_external_config()
-                        .update(key, value, EbpfMapFlags::EXIST)
+                        .update(&key, value, EbpfMapFlags::EXIST)
                 })??;
             }
             MapChange::Delete { key, old } => {
                 debug!("delete external config of {}", key);
                 skel.with_updating_wait(|skel| -> Result<()> {
-                    skel.map_external_config().delete(key)?;
-                    remove_binding_and_ct_entries(skel, key, old)
+                    skel.map_external_config().delete(&key)?;
+                    remove_binding_and_ct_entries(skel, &key, old)
                 })??;
             }
         }

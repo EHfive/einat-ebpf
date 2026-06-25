@@ -294,7 +294,7 @@ impl<P: InetPrefix> InetConfig<P> {
             .iter()
             .filter_map(|(prefix, config)| {
                 if config.flags.contains(types::DestFlags::HAIRPIN) {
-                    Some(*prefix)
+                    Some(prefix)
                 } else {
                     None
                 }
@@ -351,7 +351,7 @@ impl<P: InetPrefix> InetConfig<P> {
                 AddressOrMatcher::Matcher { match_address } => {
                     for address in addresses_set.iter() {
                         if match_address.contains(&address.ip_addr()) && !address.is_unspecified() {
-                            matches.push(*address);
+                            matches.push(address);
                         }
                     }
                 }
