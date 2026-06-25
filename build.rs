@@ -114,12 +114,6 @@ fn einat_obj_build() {
             return strip_obj(strip_cmd, bpf_obj, bpf_obj_tmp);
         }
 
-        let res = strip_obj("bpftool gen object", bpf_obj, bpf_obj_tmp);
-        if res.is_ok() {
-            return res;
-        }
-        eprintln!("strip with bpftool failed, fallback to llvm-strip");
-
         let res = strip_obj("llvm-strip -g -o", bpf_obj, bpf_obj_tmp);
         if res.is_ok() {
             return res;

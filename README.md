@@ -17,12 +17,12 @@ See example [use cases](./docs/guide/use-case.md) for what can be achieved with 
 
 For implementation details, see documentations under [reference](./docs/reference/).
 
-## Requirement
+## Requirements
 
 -   Linux kernel >= 5.15 (compiled with BPF and BTF support) on target machine
 -   Rust toolchain (`cargo` etc.)
 -   `clang` for compiling BPF C code
--   `bpftool` or `llvm-strip` for stripping compiled BPF object
+-   `llvm-strip` for stripping compiled BPF object
 -   `libbpf` headers
 -   (optional) `pkg-config` to locate `libbpf` headers
 
