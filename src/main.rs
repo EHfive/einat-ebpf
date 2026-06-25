@@ -594,6 +594,7 @@ fn main() -> Result<()> {
             snat_internals: args.snat_internals,
             ipv4_hairpin_route: hairpin_route.clone(),
             ipv6_hairpin_route: hairpin_route,
+            prefer_tcx: true,
             ..Default::default()
         };
 
