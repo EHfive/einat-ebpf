@@ -38,7 +38,7 @@ naersk'.buildPackage {
 
     # compile BPF C code
     llvmPackages.clang-unwrapped
-    bpftools
+    llvmPackages.bintools-unwrapped
   ];
   inherit buildInputs;
   strictDeps = true;

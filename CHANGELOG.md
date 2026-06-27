@@ -2,38 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.11] - 2026-06-27
+
+### Bug Fixes
+
+- Don't use bpftool for stripping
+
+### Improve
+
+- Also enable aya TCX attaching for cli interface
+
+### Chore
+
+- Update dependencies
+
 ## [0.1.10] - 2025-12-11
 
 ### 🐛 Bug Fixes
 
--   _(bpf)_ Set timeout to the correct value for ESTABLISHED conntrack
--   _(bpf)_ Fix port number format of a trace logging
+- _(bpf)_ Set timeout to the correct value for ESTABLISHED conntrack
+- _(bpf)_ Fix port number format of a trace logging
 
 ### Improve
 
--   Separate ICMP timeout and UDP timeout
+- Separate ICMP timeout and UDP timeout
 
 ## [0.1.9] - 2025-06-09
 
 ### 🐛 Bug Fixes
 
--   Workaround libbpf divide by zero
--   Ensure configuration is re-applied after interface down and re-up
--   Use 2 different rtnetlink connetions for event listening and requesting
+- Workaround libbpf divide by zero
+- Ensure configuration is re-applied after interface down and re-up
+- Use 2 different rtnetlink connetions for event listening and requesting
 
 ### Improve
 
--   Bump Rust MSRV to 1.82 & update deps
+- Bump Rust MSRV to 1.82 & update deps
 
 ## [0.1.8] - 2025-04-14
 
 ### 🐛 Bug Fixes
 
--   Fix a crash caused by IP address type conversion
+- Fix a crash caused by IP address type conversion
 
 ### Improve
 
--   Update deps & migrate to rtnetlink 0.16.0
+- Update deps & migrate to rtnetlink 0.16.0
 
 ## [0.1.7] - 2025-02-25
 
@@ -41,47 +55,47 @@ This is a hotfix that bring the minimum required Linux kernel version back to 5.
 
 ### 🐛 Bug Fixes
 
--   Initialize struct bpf_timer without accessing its opaque fields
+- Initialize struct bpf_timer without accessing its opaque fields
 
 ## [0.1.6] - 2025-02-22
 
 ### Highlights
 
--   Fixed hairpinning, it was broken since v0.1.3..
--   `bpf_fib_lookup_external` now respect `ip rule` selectors `ipproto`, `sport`, `dport` and `fwmark` in addition to previously working `from`, `to` and `oif`.
-    This is useful for balancing traffic to multiple external source addresses in a static manner, see <https://github.com/EHfive/einat-ebpf/discussions/26>.
+- Fixed hairpinning, it was broken since v0.1.3..
+- `bpf_fib_lookup_external` now respect `ip rule` selectors `ipproto`, `sport`, `dport` and `fwmark` in addition to previously working `from`, `to` and `oif`.
+  This is useful for balancing traffic to multiple external source addresses in a static manner, see <https://github.com/EHfive/einat-ebpf/discussions/26>.
 
 ### 🚀 Features
 
--   Add features info to cli version info
--   _(bpf)_ Lookup external source address with fwmark if possible
--   _(bpf)_ Fib lookup route with layer 4 ports passed
+- Add features info to cli version info
+- _(bpf)_ Lookup external source address with fwmark if possible
+- _(bpf)_ Fib lookup route with layer 4 ports passed
 
 ### 🐛 Bug Fixes
 
--   Fix setting of hairpinning flag and route table
+- Fix setting of hairpinning flag and route table
 
 ### Improve
 
--   Hide developer facing option --bpf-log from the help message
--   _(bpf)_ Update the bpf log tag to [einat]
--   Avoid converting OsString to String for config file path
--   Explicitly specify encap type for IP tunnel link types
+- Hide developer facing option --bpf-log from the help message
+- _(bpf)_ Update the bpf log tag to [einat]
+- Avoid converting OsString to String for config file path
+- Explicitly specify encap type for IP tunnel link types
 
 ## [0.1.5] - 2024-12-09
 
 ### 🐛 Bug Fixes
 
--   Prevent pkg_config from emitting Cargo linking instructions
--   Fix CLI arg --internal not being applied
+- Prevent pkg_config from emitting Cargo linking instructions
+- Fix CLI arg --internal not being applied
 
 ### Improve
 
--   Re-enable libbpf logging
--   TCX attach before all other links
--   Prefix match binding & ct addresses with external network CIDR
--   _(build)_ Error out if build commands not exit with success
--   Allow using bpftool for stripping
+- Re-enable libbpf logging
+- TCX attach before all other links
+- Prefix match binding & ct addresses with external network CIDR
+- _(build)_ Error out if build commands not exit with success
+- Allow using bpftool for stripping
 
 ## [0.1.4] - 2024-11-20
 
@@ -89,21 +103,21 @@ This is a hotfix addressing build error on Rust 1.80 on which is the minimal ver
 
 ### 🐛 Bug Fixes
 
--   Elided lifetimes in associated constant
+- Elided lifetimes in associated constant
 
 ### 🧪 Testing
 
--   Add tests for einat skel
+- Add tests for einat skel
 
 ## [0.1.3] - 2024-11-19
 
 ### Highlights
 
--   Fix a bug that might cause silent packet drop, which has been observed on PPPoE interface for large packets.
--   Use pure-rust Aya loader by default, einat now has zero native dependency except libc on target platform.
-    This should make einat be built more easily especially for cross-compilation.
--   Allow attaching eBPF programs with new TCX interface, aya loader only.
--   Allow do SNAT for specified internal network only
+- Fix a bug that might cause silent packet drop, which has been observed on PPPoE interface for large packets.
+- Use pure-rust Aya loader by default, einat now has zero native dependency except libc on target platform.
+  This should make einat be built more easily especially for cross-compilation.
+- Allow attaching eBPF programs with new TCX interface, aya loader only.
+- Allow do SNAT for specified internal network only
 
 ```bash
 # do SNAT for internal packets with source of 192.168.1.0/24 only
@@ -112,54 +126,54 @@ einat -i extern0 --hairpin-if intern0 lo --internal 192.168.1.0/24
 
 ### 🚀 Features
 
--   Add pure-Rust aya loading backend support
--   Add config option to toggle TCX interface usage
--   Allow do NAT for specified internal network only
--   Add CLI options for snat_internals and bpf_loader
+- Add pure-Rust aya loading backend support
+- Add config option to toggle TCX interface usage
+- Allow do NAT for specified internal network only
+- Add CLI options for snat_internals and bpf_loader
 
 ### 🐛 Bug Fixes
 
--   Workaround an unroll failure
--   _(ebpf)_ Always pull first header bytes
--   Split EINAT_BPF_CFLAGS args
+- Workaround an unroll failure
+- _(ebpf)_ Always pull first header bytes
+- Split EINAT_BPF_CFLAGS args
 
 ### Improve
 
--   Increase log level of libbpf netlink error to DEBUG
--   Describe NAT44 enabling more specifically
--   Log eBPF loader used
--   Enable bpf_fib_lookup_external by default on kernel>=6.7
+- Increase log level of libbpf netlink error to DEBUG
+- Describe NAT44 enabling more specifically
+- Log eBPF loader used
+- Enable bpf_fib_lookup_external by default on kernel>=6.7
 
 ## [0.1.2] - 2024-04-13
 
 ### 🚀 Features
 
--   Implement interface monitoring and dynamic attaching
--   Add CLI option to print einat version
+- Implement interface monitoring and dynamic attaching
+- Add CLI option to print einat version
 
 ### 🐛 Bug Fixes
 
--   Filter out link address of all zero
--   Fix checksums calculation of IPv6 packets
--   Passthrough unsupported types of IPv6 packet
+- Filter out link address of all zero
+- Fix checksums calculation of IPv6 packets
+- Passthrough unsupported types of IPv6 packet
 
 ### Improve
 
--   Change the default UDP/ICMP timeout to 2 mins
--   [**breaking**] Disallow user supplied if_index
+- Change the default UDP/ICMP timeout to 2 mins
+- [**breaking**] Disallow user supplied if_index
 
 ## [0.1.1] - 2024-04-07
 
 ### 🚀 Features
 
--   Add more CLI options
+- Add more CLI options
 
 ### 🐛 Bug Fixes
 
--   Guard against division by zero in libbpf-rs
--   Do not use unspecified IP address as external address
--   Fix port range merging algorithm
--   Prefer local address over prefix address
+- Guard against division by zero in libbpf-rs
+- Do not use unspecified IP address as external address
+- Fix port range merging algorithm
+- Prefer local address over prefix address
 
 ## [0.1.0] - 2024-04-05
 
