@@ -149,7 +149,7 @@ internal_if_names = [
     # "internal"
 ]
 # Hairpinning IP protocols. You can also add "icmp" here, however it would
-# results ICMP query packet to be send back to the sender due to combinated
+# results ICMP query packet to be send back to the sender due to combined
 # effect of the "Endpoint-Independent Mapping" behavior and ICMP does not
 # distinguish between source query ID and destination query ID, this is not
 # very useful thus not including "icmp" by default.

@@ -33,7 +33,7 @@ All notable changes to this project will be documented in this file.
 
 - Workaround libbpf divide by zero
 - Ensure configuration is re-applied after interface down and re-up
-- Use 2 different rtnetlink connetions for event listening and requesting
+- Use 2 different rtnetlink connections for event listening and requesting
 
 ### Improve
 
