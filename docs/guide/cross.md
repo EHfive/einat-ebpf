@@ -17,7 +17,7 @@ apt install linux-tools-common
 apt install llvm
 ```
 
-Install `rustup` to get Rust>=1.74, see https://www.rust-lang.org/tools/install. Also make sure `rustfmt` is installed as it's used by `libbpf-cargo`.
+Install `rustup` to get Rust>=1.87, see https://www.rust-lang.org/tools/install. Also make sure `rustfmt` is installed as it's used by `libbpf-cargo`.
 
 Add required target to Rust toolchain:
 
