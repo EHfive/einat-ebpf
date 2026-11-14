@@ -7,12 +7,12 @@ use std::net::Ipv6Addr;
 
 use anyhow::Result;
 use aya::maps::{Array, HashMap, LpmTrie, MapData};
+use aya::programs::TcHandle;
 use aya::programs::links::LinkOrder;
 use aya::programs::tc::{
-    qdisc_add_clsact, qdisc_detach_program, NlOptions, SchedClassifier, SchedClassifierLinkId,
-    TcAttachOptions, TcAttachType, TcError,
+    NlOptions, SchedClassifier, SchedClassifierLinkId, TcAttach, TcAttachType, TcError,
+    qdisc_add_clsact, qdisc_detach_program,
 };
-use aya::programs::TcHandle;
 use aya::util::KernelVersion;
 use aya::{Ebpf, EbpfLoader};
 use ipnet::Ipv4Net;
@@ -23,7 +23,7 @@ use super::types::{
     self, DestConfig, EinatData, ExternalConfig, MapBindingKey, MapBindingValue, MapCtKey,
     MapCtValue,
 };
-use super::{einat_obj_data, EinatConstConfig, EinatEbpf, EinatEbpfInet};
+use super::{EinatConstConfig, EinatEbpf, EinatEbpfInet, einat_obj_data};
 use crate::utils::{IpAddress, IpNetwork};
 
 type MapEinatData = Array<MapData, EinatData>;
@@ -124,7 +124,7 @@ impl EinatAya {
     fn alter_data_with<T, F: FnOnce(&mut EinatData) -> T>(&mut self, f: F) -> Result<T> {
         let mut data = self.map_data.get(&0, 0)?;
         let r = f(&mut data);
-        self.map_data.set(0, data, 0)?;
+        self.map_data.set(0, &data, 0)?;
 
         Ok(r)
     }
@@ -196,14 +196,20 @@ impl EinatEbpf for EinatAya {
         Ok(r)
     }
 
-    fn attach(&mut self, if_name: &str, _if_index: u32) -> Result<Self::Links> {
+    fn attach(&mut self, _if_name: &str, if_index: u32) -> Result<Self::Links> {
         let (ingress_opt, egress_opt) = if self.use_tcx {
             (
-                TcAttachOptions::TcxOrder(LinkOrder::first()),
-                TcAttachOptions::TcxOrder(LinkOrder::first()),
+                TcAttach::Tcx {
+                    attach_type: TcAttachType::Ingress,
+                    order: LinkOrder::first(),
+                },
+                TcAttach::Tcx {
+                    attach_type: TcAttachType::Egress,
+                    order: LinkOrder::first(),
+                },
             )
         } else {
-            if let Err(e) = qdisc_add_clsact(if_name) {
+            if let Err(e) = qdisc_add_clsact(if_index) {
                 match e {
                     // this could hit if clsact already exists
                     TcError::NetlinkError(_) => {}
@@ -211,34 +217,39 @@ impl EinatEbpf for EinatAya {
                 }
             };
 
-            let _ =
-                qdisc_detach_program(if_name, TcAttachType::Ingress, types::PROG_INGRESS_REV_SNAT);
-            let _ = qdisc_detach_program(if_name, TcAttachType::Egress, types::PROG_EGRESS_SNAT);
+            let _ = qdisc_detach_program(
+                if_index,
+                TcAttachType::Ingress.into(),
+                types::PROG_INGRESS_REV_SNAT,
+            );
+            let _ = qdisc_detach_program(
+                if_index,
+                TcAttachType::Egress.into(),
+                types::PROG_EGRESS_SNAT,
+            );
 
             (
-                TcAttachOptions::Netlink(NlOptions {
-                    priority: 1,
-                    handle: TcHandle::from(1),
-                    classid: None,
-                }),
-                TcAttachOptions::Netlink(NlOptions {
-                    priority: 1,
-                    handle: TcHandle::from(1),
-                    classid: None,
-                }),
+                TcAttach::Netlink {
+                    parent: TcAttachType::Ingress.into(),
+                    options: NlOptions {
+                        priority: 1,
+                        handle: TcHandle::from(1),
+                        classid: None,
+                    },
+                },
+                TcAttach::Netlink {
+                    parent: TcAttachType::Egress.into(),
+                    options: NlOptions {
+                        priority: 1,
+                        handle: TcHandle::from(1),
+                        classid: None,
+                    },
+                },
             )
         };
 
-        let ingress_link_id = prog_ingress_assert(&mut self.ebpf).attach_with_options(
-            if_name,
-            TcAttachType::Ingress,
-            ingress_opt,
-        )?;
-        let egress_link_id = prog_egress_assert(&mut self.ebpf).attach_with_options(
-            if_name,
-            TcAttachType::Egress,
-            egress_opt,
-        );
+        let ingress_link_id = prog_ingress_assert(&mut self.ebpf).attach(if_index, ingress_opt)?;
+        let egress_link_id = prog_egress_assert(&mut self.ebpf).attach(if_index, egress_opt);
 
         let egress_link_id = match egress_link_id {
             Ok(v) => v,
