@@ -119,8 +119,8 @@ impl LinkInfo {
             LinkLayerType::Tunnel => BareIp,
             LinkLayerType::Tunnel6 => BareIp,
             LinkLayerType::Rawip => BareIp,
-            LinkLayerType::Ipgre => Unsupported,
-            LinkLayerType::Ip6gre => Unsupported,
+            LinkLayerType::Ipgre => BareIp,
+            LinkLayerType::Ip6gre => BareIp,
             LinkLayerType::Netlink => Unsupported,
             _ => Unknown,
         }
