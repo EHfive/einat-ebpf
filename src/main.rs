@@ -355,8 +355,8 @@ impl IfContext {
         let Some((inst, _)) = &mut self.inst else {
             return Ok(());
         };
-        if let Some(hairpin_routing) = &mut ctx.v4_hairpin_routing {
-            if let Err(e) = hairpin_routing
+        if let Some(hairpin_routing) = &mut ctx.v4_hairpin_routing
+            && let Err(e) = hairpin_routing
                 .reconfigure(
                     inst.config()
                         .expect("config not applied")
@@ -367,7 +367,6 @@ impl IfContext {
             {
                 error!("failed to reconfigure IPv4 hairpin routing: {}", e);
             }
-        }
 
         #[cfg(feature = "ipv6")]
         if let Some(hairpin_routing) = &mut ctx.v6_hairpin_routing {
@@ -458,21 +457,19 @@ async fn daemon(config: Config, context: &mut DaemonContext) -> Result<JoinHandl
         while let Some(event) = events.next().await {
             match event {
                 MonitorEvent::ChangeAddress { if_index } => {
-                    if let Some(ctx) = context.get_context_by_index(if_index) {
-                        if let Err(e) = ctx.reconfigure_addresses().await {
+                    if let Some(ctx) = context.get_context_by_index(if_index)
+                        && let Err(e) = ctx.reconfigure_addresses().await {
                             error!(
                                 "failed to reconfigure addresses for interface {}: {}",
                                 ctx.if_name, e
                             );
                         };
-                    }
                 }
                 MonitorEvent::ChangeLink { if_name } => {
-                    if let Some(ctx) = context.get_context_by_name(&if_name) {
-                        if let Err(e) = ctx.reconfigure().await {
+                    if let Some(ctx) = context.get_context_by_name(&if_name)
+                        && let Err(e) = ctx.reconfigure().await {
                             error!("failed to reconfigure interface {}: {}", ctx.if_name, e);
                         }
-                    }
                 }
                 MonitorEvent::DelLink { if_name } => {
                     if let Some(ctx) = context.get_context_by_name(&if_name) {

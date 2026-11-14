@@ -335,18 +335,16 @@ impl<P: InetPrefix> InetConfig<P> {
             let mut matches = Vec::new();
             match external.address {
                 AddressOrMatcher::Static { address } => {
-                    if let Some(address) = P::from_ip_addr(address) {
-                        if !address.is_unspecified() {
+                    if let Some(address) = P::from_ip_addr(address)
+                        && !address.is_unspecified() {
                             matches.push(address);
                         }
-                    }
                 }
                 AddressOrMatcher::Network { network } => {
-                    if let Some(network) = P::from_ipnet(network) {
-                        if !network.is_unspecified() {
+                    if let Some(network) = P::from_ipnet(network)
+                        && !network.is_unspecified() {
                             matches.push(network);
                         }
-                    }
                 }
                 AddressOrMatcher::Matcher { match_address } => {
                     for address in addresses_set.iter() {

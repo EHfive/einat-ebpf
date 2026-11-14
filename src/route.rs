@@ -347,11 +347,10 @@ impl RouteHelper {
             // in case `ManageForeignRoutingPolicyRules` was not disabled.
             rule_set_protocol_kernel(add_local_rule.message_mut());
 
-            if let Err(e) = add_local_rule.execute().await {
-                if !route_err_is_exist(&e) {
+            if let Err(e) = add_local_rule.execute().await
+                && !route_err_is_exist(&e) {
                     return Err(anyhow::anyhow!(e));
                 }
-            }
         }
 
         for rule in to_delete {
@@ -520,11 +519,10 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
             .expect("invalid dest")
             .build();
 
-        if let Err(e) = self.handle().route().add(route).execute().await {
-            if !route_err_is_exist(&e) {
+        if let Err(e) = self.handle().route().add(route).execute().await
+            && !route_err_is_exist(&e) {
                 return Err(e.into());
             }
-        }
 
         self.routes.push(RouteDescriber {
             destination: dest,
@@ -558,22 +556,18 @@ impl<N: RouteIpNetwork> HairpinRouting<N> {
                 .routes
                 .iter()
                 .any(|describer| describer.matches(&route))
-            {
-                if let Err(e) = self.handle().route().del(route).execute().await {
-                    if !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
+                && let Err(e) = self.handle().route().del(route).execute().await
+                    && !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
                         error!("failed to delete route: {}", e);
                     }
-                }
-            }
         }
         self.routes.clear();
 
         for neigh in core::mem::take(&mut self.neighs) {
-            if let Err(e) = self.handle().neighbours().del(neigh).execute().await {
-                if !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
+            if let Err(e) = self.handle().neighbours().del(neigh).execute().await
+                && !(route_err_is_no_entry(&e) || route_err_is_no_dev(&e)) {
                     error!("failed to delete neigh entry: {}", e);
                 }
-            }
         }
 
         self.cache_ll_addr = None;
@@ -726,11 +720,10 @@ pub fn spawn_monitor() -> Result<(JoinHandle<()>, impl Stream<Item = MonitorEven
 
     let events = async_stream::stream!({
         while let Some((msg, _)) = group_messages.next().await {
-            if let NetlinkPayload::InnerMessage(msg) = msg.payload {
-                if let Some(event) = filter_msg(msg) {
+            if let NetlinkPayload::InnerMessage(msg) = msg.payload
+                && let Some(event) = filter_msg(msg) {
                     yield event;
                 }
-            }
         }
     });
 
@@ -738,13 +731,11 @@ pub fn spawn_monitor() -> Result<(JoinHandle<()>, impl Stream<Item = MonitorEven
 }
 
 fn route_err_is(e: &rtnetlink::Error, err_code: i32) -> bool {
-    if let rtnetlink::Error::NetlinkError(e) = e {
-        if let Some(code) = e.code {
-            if -code.get() == err_code {
+    if let rtnetlink::Error::NetlinkError(e) = e
+        && let Some(code) = e.code
+            && -code.get() == err_code {
                 return true;
             }
-        }
-    }
     false
 }
 
