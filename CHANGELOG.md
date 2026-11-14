@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-11-14
+
+The version number has bumped from 0.1.x to 0.2.0 for better tracking, there is no breaking changes.
+
+### Features
+
+- Enable support for IP over GRE tunnel (`link/gre`)
+
+### Chore
+
+- Update to aya v0.16.0, MSRV has raised to Rust 1.98 accordingly.
+
 ## [0.1.11] - 2026-06-27
 
 ### Bug Fixes
